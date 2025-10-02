@@ -1,0 +1,488 @@
+/* Apple Design System Inspired Styles */
+
+/* Custom CSS Variables */
+:root {
+  --apple-blue: #007AFF;
+  --apple-green: #34C759;
+  --apple-red: #FF3B30;
+  --apple-orange: #FF9500;
+  --apple-yellow: #FFCC00;
+  --apple-purple: #AF52DE;
+  --apple-gray: #8E8E93;
+  --apple-gray-2: #AEAEB2;
+  --apple-gray-3: #C7C7CC;
+  --apple-gray-4: #D1D1D6;
+  --apple-gray-5: #E5E5EA;
+  --apple-gray-6: #F2F2F7;
+
+  --system-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+/* Base Styles */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--system-font), "Inter", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Dark Mode Support */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --apple-bg-primary: #000000;
+    --apple-bg-secondary: #1C1C1E;
+    --apple-bg-tertiary: #2C2C2E;
+    --apple-text-primary: #FFFFFF;
+    --apple-text-secondary: #EBEBF5;
+    --apple-text-tertiary: #EBEBF599;
+    --apple-separator: #38383A;
+  }
+}
+
+/* Glass Morphism Effect */
+.glass {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.glass-dark {
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Stock Card Styles */
+.stock-card {
+  background: white;
+  border-radius: 20px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+  transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.stock-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+}
+
+.stock-card.dark {
+  background: #1C1C1E;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Stock Header */
+.stock-header {
+  padding: 24px;
+  background: linear-gradient(135deg, #f8fafc 0%, #ffffff 100%);
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.stock-card.dark .stock-header {
+  background: linear-gradient(135deg, #2C2C2E 0%, #1C1C1E 100%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.stock-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.stock-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.stock-symbol {
+  font-size: 24px;
+  font-weight: 700;
+  color: #1d1d1f;
+  letter-spacing: -0.02em;
+}
+
+.stock-card.dark .stock-symbol {
+  color: #ffffff;
+}
+
+.stock-name {
+  font-size: 14px;
+  color: #6e6e73;
+  font-weight: 400;
+}
+
+.stock-card.dark .stock-name {
+  color: #98989d;
+}
+
+.stock-price-info {
+  text-align: right;
+}
+
+.current-price {
+  font-size: 32px;
+  font-weight: 700;
+  color: #1d1d1f;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.stock-card.dark .current-price {
+  color: #ffffff;
+}
+
+.price-change {
+  font-size: 16px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.price-change.positive {
+  color: var(--apple-green);
+  background: rgba(52, 199, 89, 0.1);
+}
+
+.price-change.negative {
+  color: var(--apple-red);
+  background: rgba(255, 59, 48, 0.1);
+}
+
+/* Stock Actions */
+.stock-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.action-btn {
+  flex: 1;
+  padding: 10px 16px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.toggle-btn {
+  background: #f2f2f7;
+  color: var(--apple-blue);
+}
+
+.toggle-btn:hover {
+  background: rgba(0, 122, 255, 0.1);
+  transform: scale(1.02);
+}
+
+.sync-btn {
+  background: var(--apple-blue);
+  color: white;
+}
+
+.sync-btn:hover {
+  background: #0056CC;
+  transform: scale(1.02);
+}
+
+.sync-btn:disabled {
+  background: #d1d1d6;
+  color: #8e8e93;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.stock-card.dark .toggle-btn {
+  background: rgba(255, 255, 255, 0.1);
+  color: #0A84FF;
+}
+
+.stock-card.dark .toggle-btn:hover {
+  background: rgba(10, 132, 255, 0.2);
+}
+
+.remove-btn {
+  background: #f2f2f7;
+  color: var(--apple-red);
+}
+
+.remove-btn:hover {
+  background: rgba(255, 59, 48, 0.1);
+  transform: scale(1.02);
+}
+
+.stock-card.dark .remove-btn {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ff453a;
+}
+
+.stock-card.dark .remove-btn:hover {
+  background: rgba(255, 69, 58, 0.2);
+}
+
+/* Data Table */
+.data-table-container {
+  overflow-x: auto;
+  background: white;
+  border-radius: 0 0 20px 20px;
+}
+
+.stock-card.dark .data-table-container {
+  background: #1C1C1E;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.data-table th {
+  background: #f8fafc;
+  padding: 12px 16px;
+  text-align: left;
+  font-weight: 600;
+  color: #6e6e73;
+  border-bottom: 1px solid #e5e5ea;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.stock-card.dark .data-table th {
+  background: #2C2C2E;
+  color: #98989d;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.data-table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid #f2f2f7;
+  color: #1d1d1f;
+  white-space: nowrap;
+}
+
+.stock-card.dark .data-table td {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  color: #ffffff;
+}
+
+.data-table tr:hover td {
+  background: rgba(0, 122, 255, 0.02);
+}
+
+.stock-card.dark .data-table tr:hover td {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+/* Price Column Styles */
+.price-col {
+  font-weight: 600;
+  font-family: "SF Mono", Monaco, monospace;
+}
+
+.change-col {
+  font-weight: 500;
+}
+
+.positive-change {
+  color: var(--apple-green);
+}
+
+.negative-change {
+  color: var(--apple-red);
+}
+
+/* Expand/Collapse Animation */
+.data-content {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.data-content.expanded {
+  max-height: 600px;
+}
+
+/* Loading Animation */
+.loading-spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  border-top-color: white;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Success Message */
+.success-message {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  background: var(--apple-green);
+  color: white;
+  padding: 16px 24px;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(52, 199, 89, 0.3);
+  z-index: 1000;
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .stock-header {
+    padding: 20px;
+  }
+
+  .stock-symbol {
+    font-size: 20px;
+  }
+
+  .current-price {
+    font-size: 28px;
+  }
+
+  .data-table {
+    font-size: 12px;
+  }
+
+  .data-table th,
+  .data-table td {
+    padding: 8px 12px;
+  }
+}
+
+@media (max-width: 640px) {
+  .stock-actions {
+    flex-direction: column;
+  }
+
+  .data-table-container {
+    font-size: 11px;
+  }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+.dark ::-webkit-scrollbar-track {
+  background: #2C2C2E;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: #48484A;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #636366;
+}
+
+/* OHLC Cell Styles */
+.ohlc-cell {
+  font-size: 11px;
+  line-height: 1.2;
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+}
+
+.ohlc-open {
+  font-weight: 600;
+}
+
+.ohlc-high {
+  font-weight: 400;
+}
+
+.ohlc-low {
+  font-weight: 400;
+}
+
+.ohlc-close {
+  font-weight: 600;
+}
+
+.ohlc-volume {
+  margin-top: 1px;
+  font-weight: 400;
+}
+
+/* Table cell hover effects */
+.ohlc-cell:hover {
+  transform: scale(1.05);
+  transition: transform 0.1s ease;
+}
+
+/* Sticky column styles */
+.sticky {
+  position: sticky;
+  z-index: 10;
+}
+
+/* Responsive table */
+@media (max-width: 768px) {
+  .ohlc-cell {
+    font-size: 10px;
+  }
+
+  th.min-w-[120px] {
+    min-width: 100px;
+  }
+}
+
+@media (max-width: 640px) {
+  .ohlc-cell {
+    font-size: 9px;
+  }
+
+  th.min-w-[120px] {
+    min-width: 80px;
+  }
+}

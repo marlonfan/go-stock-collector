@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug Test</title>
+</head>
+<body>
+    <h1>Debug Test Page</h1>
+    <div id="test-output">Loading...</div>
+    <button onclick="testAPI()">Test API</button>
+
+    <script>
+        async function testAPI() {
+            console.log('Testing API...');
+            document.getElementById('test-output').innerHTML = 'Testing API...';
+
+            try {
+                const response = await fetch('/api/stocks');
+                console.log('API response status:', response.status);
+                const stocks = await response.json();
+                console.log('API response data:', stocks);
+
+                document.getElementById('test-output').innerHTML = `
+                    <h2>API Response:</h2>
+                    <pre>${JSON.stringify(stocks, null, 2)}</pre>
+                `;
+
+                if (stocks.length > 0) {
+                    const symbol = stocks[0].symbol;
+                    console.log('Testing summary API for', symbol);
+
+                    const summaryResponse = await fetch(`/api/stocks/${symbol}/summary`);
+                    const summary = await summaryResponse.json();
+                    console.log('Summary data:', summary);
+
+                    document.getElementById('test-output').innerHTML += `
+                        <h2>Summary for ${symbol}:</h2>
+                        <pre>${JSON.stringify(summary, null, 2)}</pre>
+                    `;
+                }
+            } catch (error) {
+                console.error('API test failed:', error);
+                document.getElementById('test-output').innerHTML = `Error: ${error.message}`;
+            }
+        }
+
+        // Auto test on page load
+        window.addEventListener('load', testAPI);
+    </script>
+</body>
+</html>
