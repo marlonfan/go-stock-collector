@@ -560,6 +560,17 @@ class StockTracker {
         const sortedDates = Array.from(allDates).sort().reverse(); // Most recent first
         const stockSymbols = Array.from(stockDataMap.keys());
 
+        // Sort stocks: pinned stocks first, then alphabetical
+        const pinnedStocks = this.getPinnedStocks();
+        stockSymbols.sort((a, b) => {
+            const aPinned = pinnedStocks.includes(a);
+            const bPinned = pinnedStocks.includes(b);
+
+            if (aPinned && !bPinned) return -1;
+            if (!aPinned && bPinned) return 1;
+            return a.localeCompare(b); // Alphabetical order within each group
+        });
+
         if (sortedDates.length === 0) {
             container.innerHTML = '<div class="text-center text-gray-500 py-8">No daily data available</div>';
             return;
@@ -589,8 +600,11 @@ class StockTracker {
                                 dailyDataMap.set(day.date.split('T')[0], day);
                             });
 
+                            const isPinned = this.isPinned(symbol);
+                            const pinnedClass = isPinned ? 'bg-yellow-50 dark:bg-yellow-900/10' : '';
+
                             return `
-                                <tr class="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors">
+                                <tr class="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors ${pinnedClass}">
                                     <td class="sticky left-0 bg-white dark:bg-gray-800 p-4 border-r border-gray-200 dark:border-gray-700">
                                         <div class="flex items-center justify-between">
                                             <div>
@@ -604,6 +618,13 @@ class StockTracker {
                                                 </div>
                                             </div>
                                             <div class="flex space-x-1">
+                                                <button onclick="stockTracker.togglePin('${symbol}')"
+                                                    class="p-1 ${isPinned ? 'text-yellow-600 hover:bg-yellow-50 dark:hover:bg-yellow-900/20' : 'text-gray-400 hover:text-yellow-600 hover:bg-yellow-50 dark:hover:bg-yellow-900/20'} rounded transition-colors"
+                                                    title="${isPinned ? 'Unpin Stock' : 'Pin Stock'}">
+                                                    <svg class="w-4 h-4" fill="${isPinned ? 'currentColor' : 'none'}" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2l3.09 6.32L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.05L12 2z"></path>
+                                                    </svg>
+                                                </button>
                                                 <button onclick="stockTracker.syncStockData('${symbol}')"
                                                     class="p-1 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors"
                                                     title="Sync Data">
@@ -760,6 +781,39 @@ class StockTracker {
 
         this.hideSearchResults();
         symbolInput.focus();
+    }
+
+    // Pinning functionality methods
+    getPinnedStocks() {
+        const pinned = localStorage.getItem('pinnedStocks');
+        return pinned ? JSON.parse(pinned) : [];
+    }
+
+    savePinnedStocks(pinnedStocks) {
+        localStorage.setItem('pinnedStocks', JSON.stringify(pinnedStocks));
+    }
+
+    isPinned(symbol) {
+        const pinnedStocks = this.getPinnedStocks();
+        return pinnedStocks.includes(symbol);
+    }
+
+    togglePin(symbol) {
+        const pinnedStocks = this.getPinnedStocks();
+        const index = pinnedStocks.indexOf(symbol);
+
+        if (index > -1) {
+            // Unpin
+            pinnedStocks.splice(index, 1);
+            this.showSuccess(`Unpinned ${symbol}`);
+        } else {
+            // Pin
+            pinnedStocks.push(symbol);
+            this.showSuccess(`Pinned ${symbol}`);
+        }
+
+        this.savePinnedStocks(pinnedStocks);
+        this.createHorizontalGridView(); // Refresh the grid
     }
 }
 

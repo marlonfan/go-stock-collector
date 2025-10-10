@@ -486,3 +486,50 @@ body {
     min-width: 80px;
   }
 }
+
+/* Pin Button Styles */
+.pin-btn {
+  transition: all 0.2s ease;
+}
+
+.pin-btn:hover {
+  transform: scale(1.1);
+}
+
+.pin-btn.pinned {
+  color: var(--apple-yellow);
+  animation: pinPulse 0.3s ease-out;
+}
+
+@keyframes pinPulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+
+/* Pinned Row Styles */
+tr.pinned-row {
+  background: linear-gradient(90deg, rgba(255, 204, 0, 0.05) 0%, rgba(255, 204, 0, 0.02) 100%);
+  border-left: 3px solid var(--apple-yellow);
+}
+
+tr.pinned-row:hover {
+  background: linear-gradient(90deg, rgba(255, 204, 0, 0.1) 0%, rgba(255, 204, 0, 0.05) 100%);
+}
+
+.dark tr.pinned-row {
+  background: linear-gradient(90deg, rgba(255, 204, 0, 0.1) 0%, rgba(255, 204, 0, 0.05) 100%);
+}
+
+.dark tr.pinned-row:hover {
+  background: linear-gradient(90deg, rgba(255, 204, 0, 0.15) 0%, rgba(255, 204, 0, 0.08) 100%);
+}
+
+/* Pin icon animation */
+.pin-icon {
+  transition: all 0.2s ease;
+}
+
+.pin-icon:hover {
+  filter: drop-shadow(0 0 3px rgba(255, 204, 0, 0.5));
+}
