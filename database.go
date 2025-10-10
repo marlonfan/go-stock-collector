@@ -1,134 +1,47 @@
 package main
 
 import (
-	"database/sql"
 	"fmt"
 	"math"
 	"time"
 
-	_ "modernc.org/sqlite"
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 type Database struct {
-	db *sql.DB
+	db *gorm.DB
 }
 
 func NewDatabase(dbPath string) (*Database, error) {
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %v", err)
 	}
 
-	if err := db.Ping(); err != nil {
-		return nil, fmt.Errorf("failed to connect to database: %v", err)
+	// Auto migrate tables
+	if err := db.AutoMigrate(allModels...); err != nil {
+		return nil, fmt.Errorf("failed to auto migrate: %v", err)
 	}
 
 	database := &Database{db: db}
-	if err := database.createTables(); err != nil {
-		return nil, fmt.Errorf("failed to create tables: %v", err)
+
+	// Create additional indexes that are not covered by GORM tags
+	if err := database.createAdditionalIndexes(); err != nil {
+		return nil, fmt.Errorf("failed to create additional indexes: %v", err)
 	}
 
 	return database, nil
 }
 
-func (d *Database) createTables() error {
-	createTableSQL := `
-	CREATE TABLE IF NOT EXISTS stock_minute_data (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		symbol TEXT NOT NULL,
-		timestamp DATETIME NOT NULL,
-		open REAL NOT NULL,
-		high REAL NOT NULL,
-		low REAL NOT NULL,
-		close REAL NOT NULL,
-		volume INTEGER NOT NULL,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-		UNIQUE(symbol, timestamp)
-	);
-
-	CREATE TABLE IF NOT EXISTS watched_stocks (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		symbol TEXT UNIQUE NOT NULL,
-		name TEXT,
-		added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-		last_sync DATETIME,
-		is_active BOOLEAN DEFAULT TRUE
-	);
-
-	CREATE TABLE IF NOT EXISTS stock_daily_summary (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		symbol TEXT NOT NULL,
-		date DATE NOT NULL,
-		open REAL NOT NULL,
-		high REAL NOT NULL,
-		low REAL NOT NULL,
-		close REAL NOT NULL,
-		volume INTEGER NOT NULL,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-		UNIQUE(symbol, date)
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_symbol_timestamp ON stock_minute_data(symbol, timestamp);
-	CREATE INDEX IF NOT EXISTS idx_symbol ON stock_minute_data(symbol);
-	CREATE INDEX IF NOT EXISTS idx_timestamp ON stock_minute_data(timestamp);
-	CREATE INDEX IF NOT EXISTS idx_watched_stocks_symbol ON watched_stocks(symbol);
-	CREATE INDEX IF NOT EXISTS idx_daily_summary_symbol_date ON stock_daily_summary(symbol, date);
-	`
-
-	_, err := d.db.Exec(createTableSQL)
-	if err != nil {
-		return fmt.Errorf("failed to create tables: %v", err)
-	}
-
-	return nil
-}
-
-func (d *Database) InsertMinuteData(bars []MinuteBar) error {
-	if len(bars) == 0 {
-		return nil
-	}
-
-	tx, err := d.db.Begin()
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %v", err)
-	}
-	defer tx.Rollback()
-
-	insertSQL := `
-	INSERT OR REPLACE INTO stock_minute_data
-	(symbol, timestamp, open, high, low, close, volume)
-	VALUES (?, ?, ?, ?, ?, ?, ?)
-	`
-
-	stmt, err := tx.Prepare(insertSQL)
-	if err != nil {
-		return fmt.Errorf("failed to prepare statement: %v", err)
-	}
-	defer stmt.Close()
-
-	for _, bar := range bars {
-		// Round prices to 2 decimal places to avoid floating point precision issues
-		open := roundToDecimal(bar.Open, 2)
-		high := roundToDecimal(bar.High, 2)
-		low := roundToDecimal(bar.Low, 2)
-		close := roundToDecimal(bar.Close, 2)
-
-		_, err := stmt.Exec(
-			bar.Symbol,
-			bar.Timestamp,
-			open,
-			high,
-			low,
-			close,
-			bar.Volume,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to insert bar %s %s: %v", bar.Symbol, bar.Timestamp, err)
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %v", err)
+// createAdditionalIndexes creates indexes that are not easily covered by GORM tags
+func (d *Database) createAdditionalIndexes() error {
+	// Create composite unique index for (symbol, timestamp) in stock_minute_data
+	if err := d.db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_symbol_timestamp_unique ON stock_minute_data(symbol, timestamp)").Error; err != nil {
+		return fmt.Errorf("failed to create unique index: %v", err)
 	}
 
 	return nil
@@ -140,184 +53,199 @@ func roundToDecimal(value float64, places int) float64 {
 	return math.Round(value*factor) / factor
 }
 
-func (d *Database) GetMinuteData(symbol string, startTime, endTime time.Time) ([]MinuteBar, error) {
-	query := `
-	SELECT symbol, timestamp, open, high, low, close, volume
-	FROM stock_minute_data
-	WHERE symbol = ? AND timestamp BETWEEN ? AND ?
-	ORDER BY timestamp ASC
-	`
-
-	rows, err := d.db.Query(query, symbol, startTime, endTime)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query data: %v", err)
+func (d *Database) InsertMinuteData(bars []MinuteBar) error {
+	if len(bars) == 0 {
+		return nil
 	}
-	defer rows.Close()
 
-	var bars []MinuteBar
-	for rows.Next() {
-		var bar MinuteBar
-		err := rows.Scan(
-			&bar.Symbol,
-			&bar.Timestamp,
-			&bar.Open,
-			&bar.High,
-			&bar.Low,
-			&bar.Close,
-			&bar.Volume,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan row: %v", err)
+	// Convert MinuteBar to StockMinuteData models
+	var stockData []StockMinuteData
+	for _, bar := range bars {
+		stockData = append(stockData, StockMinuteData{
+			Symbol:    bar.Symbol,
+			Timestamp: bar.Timestamp,
+			Open:      roundToDecimal(bar.Open, 2),
+			High:      roundToDecimal(bar.High, 2),
+			Low:       roundToDecimal(bar.Low, 2),
+			Close:     roundToDecimal(bar.Close, 2),
+			Volume:    bar.Volume,
+		})
+	}
+
+	// Use transaction for batch insert
+	return d.db.Transaction(func(tx *gorm.DB) error {
+		// Process in batches to avoid memory issues with large datasets
+		batchSize := 1000
+		for i := 0; i < len(stockData); i += batchSize {
+			end := i + batchSize
+			if end > len(stockData) {
+				end = len(stockData)
+			}
+
+			batch := stockData[i:end]
+			for _, data := range batch {
+				// Use OnConflict to handle INSERT OR REPLACE
+				result := tx.Where("symbol = ? AND timestamp = ?", data.Symbol, data.Timestamp).
+					FirstOrCreate(&data, StockMinuteData{
+						Symbol:    data.Symbol,
+						Timestamp: data.Timestamp,
+						Open:      data.Open,
+						High:      data.High,
+						Low:       data.Low,
+						Close:     data.Close,
+						Volume:    data.Volume,
+					})
+
+				if result.Error != nil {
+					return fmt.Errorf("failed to insert bar %s %s: %v", data.Symbol, data.Timestamp, result.Error)
+				}
+
+				// If record already exists, update it
+				if result.RowsAffected == 0 {
+					updateResult := tx.Model(&StockMinuteData{}).
+						Where("symbol = ? AND timestamp = ?", data.Symbol, data.Timestamp).
+						Updates(map[string]interface{}{
+							"open":   data.Open,
+							"high":   data.High,
+							"low":    data.Low,
+							"close":  data.Close,
+							"volume": data.Volume,
+						})
+					if updateResult.Error != nil {
+						return fmt.Errorf("failed to update bar %s %s: %v", data.Symbol, data.Timestamp, updateResult.Error)
+					}
+				}
+			}
 		}
-		bars = append(bars, bar)
+		return nil
+	})
+}
+
+func (d *Database) GetMinuteData(symbol string, startTime, endTime time.Time) ([]MinuteBar, error) {
+	var stockData []StockMinuteData
+	result := d.db.Where("symbol = ? AND timestamp BETWEEN ? AND ?", symbol, startTime, endTime).
+		Order("timestamp ASC").
+		Find(&stockData)
+
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to query data: %v", result.Error)
 	}
 
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("row iteration error: %v", err)
+	// Convert StockMinuteData to MinuteBar for compatibility
+	var bars []MinuteBar
+	for _, data := range stockData {
+		bars = append(bars, MinuteBar{
+			Symbol:    data.Symbol,
+			Timestamp: data.Timestamp,
+			Open:      data.Open,
+			High:      data.High,
+			Low:       data.Low,
+			Close:     data.Close,
+			Volume:    data.Volume,
+		})
 	}
 
 	return bars, nil
 }
 
 func (d *Database) GetLatestTimestamp(symbol string) (time.Time, error) {
-	query := `
-	SELECT MAX(timestamp)
-	FROM stock_minute_data
-	WHERE symbol = ?
-	`
+	var stockData StockMinuteData
+	result := d.db.Where("symbol = ?", symbol).
+		Order("timestamp DESC").
+		First(&stockData)
 
-	var latestTimestampStr sql.NullString
-	err := d.db.QueryRow(query, symbol).Scan(&latestTimestampStr)
-	if err != nil {
-		if err == sql.ErrNoRows {
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
 			return time.Time{}, nil
 		}
-		return time.Time{}, fmt.Errorf("failed to query latest timestamp: %v", err)
+		return time.Time{}, fmt.Errorf("failed to query latest timestamp: %v", result.Error)
 	}
 
-	if !latestTimestampStr.Valid || latestTimestampStr.String == "" {
-		return time.Time{}, nil
-	}
-
-	// Try different time formats
-	formats := []string{
-		"2006-01-02 15:04:05",
-		"2006-01-02 15:04:05-07:00",
-		time.RFC3339,
-	}
-
-	var latestTimestamp time.Time
-	var parseErr error
-	for _, format := range formats {
-		latestTimestamp, parseErr = time.Parse(format, latestTimestampStr.String)
-		if parseErr == nil {
-			return latestTimestamp, nil
-		}
-	}
-	return time.Time{}, fmt.Errorf("failed to parse latest timestamp: %v", parseErr)
+	return stockData.Timestamp, nil
 }
 
 func (d *Database) GetDataStats(symbol string) (int, time.Time, time.Time, error) {
-	query := `
-	SELECT
-		COUNT(*) as total_records,
-		MIN(timestamp) as earliest_timestamp,
-		MAX(timestamp) as latest_timestamp
-	FROM stock_minute_data
-	WHERE symbol = ?
-	`
-
-	var count int
-	var earliestStr, latestStr string
-	err := d.db.QueryRow(query, symbol).Scan(&count, &earliestStr, &latestStr)
+	// Get count first
+	var count int64
+	err := d.db.Model(&StockMinuteData{}).
+		Where("symbol = ?", symbol).
+		Count(&count).Error
 	if err != nil {
-		return 0, time.Time{}, time.Time{}, fmt.Errorf("failed to get stats: %v", err)
+		return 0, time.Time{}, time.Time{}, fmt.Errorf("failed to get count: %v", err)
 	}
 
-	var earliestTime, latestTime time.Time
-	var errParse error
-	if earliestStr != "" {
-		earliestTime, errParse = time.Parse("2006-01-02 15:04:05", earliestStr)
-		if errParse != nil {
-			return 0, time.Time{}, time.Time{}, fmt.Errorf("failed to parse earliest time: %v", errParse)
-		}
-	}
-	if latestStr != "" {
-		latestTime, errParse = time.Parse("2006-01-02 15:04:05", latestStr)
-		if errParse != nil {
-			return 0, time.Time{}, time.Time{}, fmt.Errorf("failed to parse latest time: %v", errParse)
-		}
+	if count == 0 {
+		return 0, time.Time{}, time.Time{}, nil
 	}
 
-	return count, earliestTime, latestTime, nil
+	// Get earliest and latest timestamps using First/Last
+	var earliest, latest StockMinuteData
+
+	err = d.db.Where("symbol = ?", symbol).
+		Order("timestamp ASC").
+		First(&earliest).Error
+	if err != nil {
+		return 0, time.Time{}, time.Time{}, fmt.Errorf("failed to get earliest timestamp: %v", err)
+	}
+
+	err = d.db.Where("symbol = ?", symbol).
+		Order("timestamp DESC").
+		First(&latest).Error
+	if err != nil {
+		return 0, time.Time{}, time.Time{}, fmt.Errorf("failed to get latest timestamp: %v", err)
+	}
+
+	return int(count), earliest.Timestamp, latest.Timestamp, nil
 }
 
 func (d *Database) Close() error {
-	return d.db.Close()
+	sqlDB, err := d.db.DB()
+	if err != nil {
+		return fmt.Errorf("failed to get underlying sql.DB: %v", err)
+	}
+	return sqlDB.Close()
 }
 
 // Watched Stocks operations
 func (d *Database) AddWatchedStock(symbol, name string) error {
-	query := `INSERT OR IGNORE INTO watched_stocks (symbol, name) VALUES (?, ?)`
-	_, err := d.db.Exec(query, symbol, name)
-	if err != nil {
-		return fmt.Errorf("failed to add watched stock: %v", err)
+	stock := WatchedStock{
+		Symbol:   symbol,
+		Name:     name,
+		IsActive: true,
 	}
+
+	result := d.db.Where("symbol = ?", symbol).FirstOrCreate(&stock)
+	if result.Error != nil {
+		return fmt.Errorf("failed to add watched stock: %v", result.Error)
+	}
+
 	return nil
 }
 
 func (d *Database) RemoveWatchedStock(symbol string) error {
-	query := `DELETE FROM watched_stocks WHERE symbol = ?`
-	_, err := d.db.Exec(query, symbol)
-	if err != nil {
-		return fmt.Errorf("failed to remove watched stock: %v", err)
+	result := d.db.Where("symbol = ?", symbol).Delete(&WatchedStock{})
+	if result.Error != nil {
+		return fmt.Errorf("failed to remove watched stock: %v", result.Error)
 	}
 	return nil
 }
 
 func (d *Database) GetWatchedStocks() ([]WatchedStock, error) {
-	query := `
-	SELECT id, symbol, name, added_at, last_sync, is_active
-	FROM watched_stocks
-	WHERE is_active = TRUE
-	ORDER BY added_at DESC
-	`
-
-	rows, err := d.db.Query(query)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query watched stocks: %v", err)
-	}
-	defer rows.Close()
-
 	var stocks []WatchedStock
-	for rows.Next() {
-		var stock WatchedStock
-		var lastSync sql.NullTime
-		err := rows.Scan(
-			&stock.ID,
-			&stock.Symbol,
-			&stock.Name,
-			&stock.AddedAt,
-			&lastSync,
-			&stock.IsActive,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan watched stock: %v", err)
-		}
-		if lastSync.Valid {
-			stock.LastSync = lastSync.Time
-		}
-		stocks = append(stocks, stock)
+	result := d.db.Where("is_active = ?", true).Order("added_at DESC").Find(&stocks)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to query watched stocks: %v", result.Error)
 	}
 
-	return stocks, rows.Err()
+	return stocks, nil
 }
 
 func (d *Database) UpdateLastSync(symbol string) error {
-	query := `UPDATE watched_stocks SET last_sync = CURRENT_TIMESTAMP WHERE symbol = ?`
-	_, err := d.db.Exec(query, symbol)
-	if err != nil {
-		return fmt.Errorf("failed to update last sync: %v", err)
+	result := d.db.Model(&WatchedStock{}).
+		Where("symbol = ?", symbol).
+		Update("last_sync", time.Now())
+	if result.Error != nil {
+		return fmt.Errorf("failed to update last sync: %v", result.Error)
 	}
 	return nil
 }
@@ -352,7 +280,7 @@ func (d *Database) UpdateDailySummary(symbol string, bars []MinuteBar) error {
 	}
 
 	// Calculate daily summaries from grouped bars
-	summaries := make(map[string]DailySummary)
+	summaries := make(map[string]StockDailySummary)
 	for date, dayBars := range dailyData {
 		if len(dayBars) == 0 {
 			continue
@@ -389,9 +317,15 @@ func (d *Database) UpdateDailySummary(symbol string, bars []MinuteBar) error {
 			volume += bar.Volume
 		}
 
-		summary := DailySummary{
+		// Parse the date string for the summary date (use first bar's date, but set to start of day in UTC)
+		parsedDate, err := time.Parse("2006-01-02", date)
+		if err != nil {
+			return fmt.Errorf("failed to parse date %s: %v", date, err)
+		}
+
+		summary := StockDailySummary{
 			Symbol: symbol,
-			Date:   firstBar.Timestamp,
+			Date:   parsedDate,
 			Open:   roundToDecimal(open, 2),
 			High:   roundToDecimal(high, 2),
 			Low:    roundToDecimal(low, 2),
@@ -401,98 +335,88 @@ func (d *Database) UpdateDailySummary(symbol string, bars []MinuteBar) error {
 		summaries[date] = summary
 	}
 
-	// Insert daily summaries
-	tx, err := d.db.Begin()
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %v", err)
-	}
-	defer tx.Rollback()
+	// Insert daily summaries using GORM transaction
+	return d.db.Transaction(func(tx *gorm.DB) error {
+		for _, summary := range summaries {
+			// Use FirstOrCreate to handle INSERT OR REPLACE logic
+			result := tx.Where("symbol = ? AND date = ?", summary.Symbol, summary.Date).
+				FirstOrCreate(&summary, StockDailySummary{
+					Symbol: summary.Symbol,
+					Date:   summary.Date,
+					Open:   summary.Open,
+					High:   summary.High,
+					Low:    summary.Low,
+					Close:  summary.Close,
+					Volume: summary.Volume,
+				})
 
-	insertSQL := `
-	INSERT OR REPLACE INTO stock_daily_summary
-	(symbol, date, open, high, low, close, volume)
-	VALUES (?, ?, ?, ?, ?, ?, ?)
-	`
+			if result.Error != nil {
+				return fmt.Errorf("failed to insert daily summary for %s: %v", summary.Date.Format("2006-01-02"), result.Error)
+			}
 
-	stmt, err := tx.Prepare(insertSQL)
-	if err != nil {
-		return fmt.Errorf("failed to prepare statement: %v", err)
-	}
-	defer stmt.Close()
-
-	for _, summary := range summaries {
-		_, err := stmt.Exec(
-			summary.Symbol,
-			summary.Date.Format("2006-01-02"),
-			summary.Open,
-			summary.High,
-			summary.Low,
-			summary.Close,
-			summary.Volume,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to insert daily summary for %s: %v", summary.Date.Format("2006-01-02"), err)
+			// If record already exists, update it
+			if result.RowsAffected == 0 {
+				updateResult := tx.Model(&StockDailySummary{}).
+					Where("symbol = ? AND date = ?", summary.Symbol, summary.Date).
+					Updates(map[string]interface{}{
+						"open":   summary.Open,
+						"high":   summary.High,
+						"low":    summary.Low,
+						"close":  summary.Close,
+						"volume": summary.Volume,
+					})
+				if updateResult.Error != nil {
+					return fmt.Errorf("failed to update daily summary for %s: %v", summary.Date.Format("2006-01-02"), updateResult.Error)
+				}
+			}
 		}
-	}
-
-	return tx.Commit()
+		return nil
+	})
 }
 
-func (d *Database) GetDailySummary(symbol string, days int) ([]DailySummary, error) {
-	query := `
-	SELECT id, symbol, date, open, high, low, close, volume, created_at
-	FROM stock_daily_summary
-	WHERE symbol = ? AND date >= date('now', '-%d days')
-	ORDER BY date DESC
-	`
+func (d *Database) GetDailySummary(symbol string, days int) ([]DailySummaryAPI, error) {
+	var stockSummaries []StockDailySummary
+	// Calculate the date threshold
+	thresholdDate := time.Now().AddDate(0, 0, -days).Format("2006-01-02")
+	result := d.db.Where("symbol = ? AND date >= ?", symbol, thresholdDate).
+		Order("date DESC").
+		Find(&stockSummaries)
 
-	rows, err := d.db.Query(fmt.Sprintf(query, days), symbol)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query daily summary: %v", err)
-	}
-	defer rows.Close()
-
-	var summaries []DailySummary
-	for rows.Next() {
-		var summary DailySummary
-		err := rows.Scan(
-			&summary.ID,
-			&summary.Symbol,
-			&summary.Date,
-			&summary.Open,
-			&summary.High,
-			&summary.Low,
-			&summary.Close,
-			&summary.Volume,
-			&summary.CreateAt,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan daily summary: %v", err)
-		}
-		summaries = append(summaries, summary)
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to query daily summary: %v", result.Error)
 	}
 
-	return summaries, rows.Err()
+	// Convert StockDailySummary to DailySummaryAPI for compatibility
+	var summaries []DailySummaryAPI
+	for _, stockSummary := range stockSummaries {
+		summaries = append(summaries, DailySummaryAPI{
+			ID:       int(stockSummary.ID),
+			Symbol:   stockSummary.Symbol,
+			Date:     stockSummary.Date,
+			Open:     stockSummary.Open,
+			High:     stockSummary.High,
+			Low:      stockSummary.Low,
+			Close:    stockSummary.Close,
+			Volume:   stockSummary.Volume,
+			CreateAt: stockSummary.CreatedAt,
+		})
+	}
+
+	return summaries, nil
 }
 
 func (d *Database) GetLatestPrice(symbol string) (float64, time.Time, error) {
-	query := `
-	SELECT close, timestamp
-	FROM stock_minute_data
-	WHERE symbol = ?
-	ORDER BY timestamp DESC
-	LIMIT 1
-	`
+	var stockData StockMinuteData
+	result := d.db.Where("symbol = ?", symbol).
+		Order("timestamp DESC").
+		First(&stockData)
 
-	var price float64
-	var timestamp time.Time
-	err := d.db.QueryRow(query, symbol).Scan(&price, &timestamp)
-	if err != nil {
-		if err == sql.ErrNoRows {
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
 			return 0, time.Time{}, fmt.Errorf("no data found for symbol %s", symbol)
 		}
-		return 0, time.Time{}, fmt.Errorf("failed to query latest price: %v", err)
+		return 0, time.Time{}, fmt.Errorf("failed to query latest price: %v", result.Error)
 	}
 
-	return price, timestamp, nil
+	return stockData.Close, stockData.Timestamp, nil
 }

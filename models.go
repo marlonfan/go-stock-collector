@@ -4,25 +4,29 @@ import (
 	"time"
 )
 
-type WatchedStock struct {
-	ID        int       `json:"id" db:"id"`
-	Symbol    string    `json:"symbol" db:"symbol"`
-	Name      string    `json:"name" db:"name"`
-	AddedAt   time.Time `json:"addedAt" db:"added_at"`
-	LastSync  time.Time `json:"lastSync" db:"last_sync"`
-	IsActive  bool      `json:"isActive" db:"is_active"`
+// Legacy models for API compatibility (now using GORM models from gorm_models.go)
+
+// WatchedStockAPI is the API-compatible version of WatchedStock
+type WatchedStockAPI struct {
+	ID        int       `json:"id"`
+	Symbol    string    `json:"symbol"`
+	Name      string    `json:"name"`
+	AddedAt   time.Time `json:"addedAt"`
+	LastSync  *time.Time `json:"lastSync"`
+	IsActive  bool      `json:"isActive"`
 }
 
-type DailySummary struct {
-	ID       int       `json:"id" db:"id"`
-	Symbol   string    `json:"symbol" db:"symbol"`
-	Date     time.Time `json:"date" db:"date"`
-	Open     float64   `json:"open" db:"open"`
-	High     float64   `json:"high" db:"high"`
-	Low      float64   `json:"low" db:"low"`
-	Close    float64   `json:"close" db:"close"`
-	Volume   int64     `json:"volume" db:"volume"`
-	CreateAt time.Time `json:"createdAt" db:"created_at"`
+// DailySummaryAPI is the API-compatible version of StockDailySummary
+type DailySummaryAPI struct {
+	ID       int       `json:"id"`
+	Symbol   string    `json:"symbol"`
+	Date     time.Time `json:"date"`
+	Open     float64   `json:"open"`
+	High     float64   `json:"high"`
+	Low      float64   `json:"low"`
+	Close    float64   `json:"close"`
+	Volume   int64     `json:"volume"`
+	CreateAt time.Time `json:"createdAt"`
 }
 
 type StockSummary struct {
@@ -32,7 +36,7 @@ type StockSummary struct {
 	Change       float64           `json:"change"`
 	ChangePercent float64          `json:"changePercent"`
 	LastUpdate   time.Time         `json:"lastUpdate"`
-	DailyData    []DailySummary    `json:"dailyData"`
+	DailyData    []DailySummaryAPI `json:"dailyData"`
 	IsActive     bool              `json:"isActive"`
 }
 

@@ -16,7 +16,20 @@ func (ws *WebServer) getWatchedStocks(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, stocks)
+	// Convert GORM models to API models
+	var apiStocks []WatchedStockAPI
+	for _, stock := range stocks {
+		apiStocks = append(apiStocks, WatchedStockAPI{
+			ID:       int(stock.ID),
+			Symbol:   stock.Symbol,
+			Name:     stock.Name,
+			AddedAt:  stock.AddedAt,
+			LastSync: stock.LastSync,
+			IsActive: stock.IsActive,
+		})
+	}
+
+	c.JSON(http.StatusOK, apiStocks)
 }
 
 func (ws *WebServer) addWatchedStock(c *gin.Context) {
@@ -66,6 +79,21 @@ func (ws *WebServer) getStockSummary(c *gin.Context) {
 		return
 	}
 
+	// Get watched stocks to find stock name
+	watchedStocks, err := ws.collector.database.GetWatchedStocks()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	var stockName string
+	for _, stock := range watchedStocks {
+		if stock.Symbol == symbol {
+			stockName = stock.Name
+			break
+		}
+	}
+
 	// Get daily summary for last 30 days
 	dailyData, err := ws.collector.database.GetDailySummary(symbol, 30)
 	if err != nil {
@@ -79,6 +107,7 @@ func (ws *WebServer) getStockSummary(c *gin.Context) {
 		// If no price data, return just the daily data
 		c.JSON(http.StatusOK, StockSummary{
 			Symbol:     symbol,
+			Name:       stockName,
 			DailyData:  dailyData,
 			IsActive:   true,
 		})
@@ -101,6 +130,7 @@ func (ws *WebServer) getStockSummary(c *gin.Context) {
 
 	summary := StockSummary{
 		Symbol:        symbol,
+		Name:          stockName,
 		CurrentPrice:  currentPrice,
 		Change:        change,
 		ChangePercent: changePercent,
