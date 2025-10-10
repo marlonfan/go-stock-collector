@@ -1,9 +1,6 @@
 # Build stage
 FROM golang:1.23-alpine AS builder
 
-# Install build dependencies (only tzdata needed now)
-RUN apk add --no-cache tzdata
-
 # Set working directory
 WORKDIR /app
 
@@ -27,17 +24,13 @@ FROM alpine:latest
 
 # Install runtime dependencies
 RUN apk add --no-cache \
-    sqlite \
+    ca-certificates \
     tzdata \
-    ca-certificates
+    wget
 
-# Install required timezones
-RUN apk add --no-cache tzdata && \
-    cp /usr/share/zoneinfo/Asia/Shanghai /usr/share/zoneinfo/America/New_York /tmp/ && \
-    apk del tzdata && \
-    mkdir -p /usr/share/zoneinfo/Asia /usr/share/zoneinfo/America && \
-    cp /tmp/Shanghai /usr/share/zoneinfo/Asia/ && \
-    cp /tmp/New_York /usr/share/zoneinfo/America/
+# Copy timezone data and set up timezone support
+RUN cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
+    echo "Asia/Shanghai" > /etc/timezone
 
 # Create app user
 RUN addgroup -g 1001 -S appgroup && \
@@ -53,7 +46,7 @@ COPY --from=builder /app/stock-data-collector .
 COPY --from=builder /app/static ./static
 COPY --from=builder /app/stocks.csv .
 
-# Create data directory
+# Create data directory with proper permissions
 RUN mkdir -p data && chown -R appuser:appgroup /app
 
 # Switch to non-root user
@@ -62,9 +55,12 @@ USER appuser
 # Expose port
 EXPOSE 8080
 
+# Environment variables
+ENV TZ=Asia/Shanghai
+
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:8080/api/stocks || exit 1
 
 # Default command - start web server with scheduler enabled
-CMD ["./stock-data-collector", "-mode=web", "-port=8080", "-scheduler=true"]
+CMD ["./stock-data-collector", "-mode=web", "-port=8080", "-db=/app/data/stock_data.db", "-scheduler=true"]

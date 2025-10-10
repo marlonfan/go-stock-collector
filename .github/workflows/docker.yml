@@ -23,7 +23,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        go-version: '1.21'
+        go-version: '1.23'
 
     - name: Cache Go modules
       uses: actions/cache@v4
@@ -37,10 +37,10 @@ jobs:
       run: go mod download
 
     - name: Build
-      run: CGO_ENABLED=1 go build -v ./...
+      run: go build -v ./...
 
     - name: Run tests
-      run: CGO_ENABLED=1 go test -v ./...
+      run: go test -v ./...
 
   build-and-push:
     name: Build and Push Docker Image
@@ -105,7 +105,7 @@ jobs:
           -p 8081:8080 \
           -v /tmp/test-data:/app/data \
           ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }} \
-          -db=/app/data/test.db
+          ./stock-data-collector -mode=web -port=8080 -db=/app/data/test.db -scheduler=false
 
         # Wait for container to start
         sleep 10
