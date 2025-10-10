@@ -124,7 +124,7 @@ docker-compose run --rm stock-cli
 - ✅ **数据持久化**: 数据库文件映射到本地目录
 - ✅ **非 root 用户**: 提高安全性
 - ✅ **自动重启**: 容器异常退出时自动重启
-- ✅ **多架构支持**: 支持 linux/amd64 和 linux/arm64 架构
+- ✅ **单架构优化**: 专注支持 linux/amd64 架构，简化构建过程
 
 ## GitHub Container Registry (GHCR)
 
@@ -202,14 +202,14 @@ services:
 
 2. **创建标签** (`v*.*.*`)
    - 创建 GitHub Release
-   - 构建多架构镜像
-   - 构建跨平台二进制文件
+   - 构建 Docker 镜像 (linux/amd64)
+   - 构建跨平台二进制文件 (Linux/macOS/Windows)
    - 上传发布资产
 
-3. **每日安全扫描**
-   - Gosec 代码安全扫描
-   - Trivy 容器镜像扫描
-   - 依赖漏洞检查
+3. **自动验证**
+   - 容器功能测试
+   - 数据库挂载验证
+   - API 接口测试
 
 ### 手动触发
 
@@ -273,7 +273,7 @@ curl -f http://localhost:8080/api/stocks
 
 **GitHub Actions 自动验证**：
 - 每次推送代码时自动测试上述流程
-- 验证多架构镜像构建（amd64/arm64）
+- 验证 Docker 镜像构建（amd64）
 - 确保数据库挂载配置正确性
 
 ### 发布新版本

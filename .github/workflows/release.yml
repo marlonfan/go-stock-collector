@@ -90,7 +90,6 @@ jobs:
       matrix:
         include:
           - platform: linux/amd64
-          - platform: linux/arm64
 
     steps:
     - name: Checkout code
@@ -121,7 +120,6 @@ jobs:
       uses: docker/build-push-action@v5
       with:
         context: .
-        platforms: ${{ matrix.platform }}
         push: true
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
@@ -137,12 +135,8 @@ jobs:
         include:
           - goos: linux
             goarch: amd64
-          - goos: linux
-            goarch: arm64
           - goos: darwin
             goarch: amd64
-          - goos: darwin
-            goarch: arm64
           - goos: windows
             goarch: amd64
 

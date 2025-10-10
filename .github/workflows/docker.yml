@@ -57,8 +57,6 @@ jobs:
         include:
           - platform: linux/amd64
             dockerfile: ./Dockerfile
-          - platform: linux/arm64
-            dockerfile: ./Dockerfile
 
     steps:
     - name: Checkout code
@@ -91,15 +89,13 @@ jobs:
       with:
         context: .
         file: ${{ matrix.dockerfile }}
-        platforms: ${{ matrix.platform }}
         push: true
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
-    - name: Test Docker image (amd64 only)
-      if: matrix.platform == 'linux/amd64'
+    - name: Test Docker image
       run: |
         # Create test data directory
         mkdir -p /tmp/test-data
@@ -133,8 +129,7 @@ jobs:
         docker stop test-container
         docker rm test-container
 
-    - name: Test docker-compose (amd64 only)
-      if: matrix.platform == 'linux/amd64'
+    - name: Test docker-compose
       run: |
         # Create temporary directory for compose test
         cd /tmp && mkdir compose-test && cd compose-test
