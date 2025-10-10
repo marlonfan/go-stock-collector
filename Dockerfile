@@ -17,7 +17,10 @@ RUN go mod download
 COPY . .
 
 # Build the application
-RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o stock-data-collector .
+ENV CGO_ENABLED=1
+ENV GOOS=linux
+ENV GOARCH=amd64
+RUN go build -ldflags "-extldflags -static" -a -installsuffix cgo -o stock-data-collector .
 
 # Final stage
 FROM alpine:latest
