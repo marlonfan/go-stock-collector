@@ -46,12 +46,10 @@ jobs:
 
     - name: Create Release
       id: create_release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      uses: softprops/action-gh-release@v1
       with:
         tag_name: ${{ steps.get_version.outputs.version }}
-        release_name: Release ${{ steps.get_version.outputs.version }}
+        name: Release ${{ steps.get_version.outputs.version }}
         body: |
           ## 🚀 Release ${{ steps.get_version.outputs.version }}
 
@@ -75,6 +73,9 @@ jobs:
           Auto-generated release from tag ${{ steps.get_version.outputs.version }}
         draft: false
         prerelease: false
+        files: |
+          *.tar.gz
+          *.zip
 
   build-and-push-release:
     name: Build and Push Release Images
@@ -181,14 +182,4 @@ jobs:
           tar -czf "${OUTPUT}.tar.gz" "$OUTPUT"
         fi
 
-    - name: Upload Release Asset
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ needs.create-release.outputs.upload_url }}
-        asset_path: |
-          ${{ matrix.goos == 'windows' && format('stock-data-collector-{0}-{1}-{2}.zip', needs.create-release.outputs.version, matrix.goos, matrix.goarch) || format('stock-data-collector-{0}-{1}-{2}.tar.gz', needs.create-release.outputs.version, matrix.goos, matrix.goarch) }}
-        asset_name: |
-          ${{ matrix.goos == 'windows' && format('stock-data-collector-{0}-{1}-{2}.zip', needs.create-release.outputs.version, matrix.goos, matrix.goarch) || format('stock-data-collector-{0}-{1}-{2}.tar.gz', needs.create-release.outputs.version, matrix.goos, matrix.goarch) }}
-        asset_content_type: application/octet-stream
+    
