@@ -58,9 +58,5 @@ EXPOSE 8080
 # Environment variables
 ENV TZ=Asia/Shanghai
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/api/stocks || exit 1
-
 # Default command - start web server with scheduler enabled
 CMD ["./stock-data-collector", "-mode=web", "-port=8080", "-db=/app/data/stock_data.db", "-scheduler=true"]
