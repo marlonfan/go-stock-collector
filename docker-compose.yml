@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  stock-data-collector:
+    build: .
+    container_name: stock-data-collector
+    ports:
+      - "8080:8080"
+    environment:
+      - TZ=Asia/Shanghai
+    command: ["./stock-data-collector", "-mode=web", "-port=8080", "-scheduler=true", "-db=/app/data/stock_data.db"]
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/api/stocks"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Optional: Run CLI commands in a one-off container
+  stock-cli:
+    build: .
+    container_name: stock-cli
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./data:/app/data
+    profiles:
+      - cli
+    working_dir: /app
+    command: tail -f /dev/null  # Keep container running for manual CLI usage
+
+volumes:
+  stock_data:
+    driver: local

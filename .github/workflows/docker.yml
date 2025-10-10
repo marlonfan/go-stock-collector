@@ -1,0 +1,188 @@
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+
+    - name: Cache Go modules
+      uses: actions/cache@v3
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Install dependencies
+      run: go mod download
+
+    - name: Build
+      run: CGO_ENABLED=1 go build -v ./...
+
+    - name: Run tests
+      run: CGO_ENABLED=1 go test -v ./...
+
+  build-and-push:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name != 'pull_request'
+
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      matrix:
+        include:
+          - platform: linux/amd64
+            dockerfile: ./Dockerfile
+          - platform: linux/arm64
+            dockerfile: ./Dockerfile
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push Docker image
+      id: build
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ${{ matrix.dockerfile }}
+        platforms: ${{ matrix.platform }}
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Test Docker image (amd64 only)
+      if: matrix.platform == 'linux/amd64'
+      run: |
+        # Create test data directory
+        mkdir -p /tmp/test-data
+
+        # Run container with database mount
+        docker run -d --name test-container \
+          -p 8081:8080 \
+          -v /tmp/test-data:/app/data \
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }} \
+          -db=/app/data/test.db
+
+        # Wait for container to start
+        sleep 10
+
+        # Test health check
+        curl -f http://localhost:8081/api/stocks || exit 1
+
+        # Verify database file was created in mounted directory
+        ls -la /tmp/test-data/
+        test -f /tmp/test-data/test.db || exit 1
+
+        # Test CLI functionality
+        docker exec test-container ./stock-data-collector -mode=cli -symbol=AAPL -days=1 -action=collect -db=/app/data/test.db
+
+        # Verify database still exists and contains data
+        test -s /tmp/test-data/test.db || exit 1
+
+        echo "✅ Docker image test passed - database mount working correctly"
+
+        # Cleanup
+        docker stop test-container
+        docker rm test-container
+
+    - name: Test docker-compose (amd64 only)
+      if: matrix.platform == 'linux/amd64'
+      run: |
+        # Create temporary directory for compose test
+        cd /tmp && mkdir compose-test && cd compose-test
+
+        # Copy docker-compose file and modify image
+        cat > docker-compose.yml << EOF
+        version: '3.8'
+        services:
+          stock-data-collector:
+            image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+            container_name: test-compose
+            ports:
+              - "8082:8080"
+            environment:
+              - TZ=Asia/Shanghai
+            volumes:
+              - ./data:/app/data
+            command: ["./stock-data-collector", "-mode=web", "-port=8080", "-scheduler=false", "-db=/app/data/compose-test.db"]
+            restart: unless-stopped
+        EOF
+
+        # Start with docker-compose
+        docker-compose up -d
+
+        # Wait for startup
+        sleep 15
+
+        # Test API
+        curl -f http://localhost:8082/api/stocks || exit 1
+
+        # Verify database in mounted volume
+        test -f ./data/compose-test.db || exit 1
+
+        echo "✅ Docker-compose test passed"
+
+        # Cleanup
+        docker-compose down -v
+        cd /github/workspace
+
+    - name: Generate SBOM
+      uses: anchore/sbom-action@v0
+      with:
+        image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+        format: spdx-json
+        output-file: sbom.spdx.json
+
+    - name: Upload SBOM
+      uses: actions/upload-artifact@v3
+      with:
+        name: sbom
+        path: sbom.spdx.json

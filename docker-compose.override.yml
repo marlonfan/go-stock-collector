@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  stock-data-collector:
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+    command: ["./stock-data-collector", "-mode=web", "-port=${WEB_PORT:-8080}", "-scheduler=${SCHEDULER:-true}", "-db=${DB_PATH:-/app/data/stock_data.db}"]
+    volumes:
+      - ${DATA_DIR:-./data}:/app/data
+      - ${LOGS_DIR:-./logs}:/app/logs
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+
+  stock-cli:
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+    volumes:
+      - ${DATA_DIR:-./data}:/app/data
+    working_dir: /app

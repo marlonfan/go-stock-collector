@@ -1,0 +1,67 @@
+# Build stage
+FROM golang:1.21-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache gcc musl-dev sqlite-dev tzdata
+
+# Set working directory
+WORKDIR /app
+
+# Copy go mod files
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the application
+RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o stock-data-collector .
+
+# Final stage
+FROM alpine:latest
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    sqlite \
+    tzdata \
+    ca-certificates
+
+# Install required timezones
+RUN apk add --no-cache tzdata && \
+    cp /usr/share/zoneinfo/Asia/Shanghai /usr/share/zoneinfo/America/New_York /tmp/ && \
+    apk del tzdata && \
+    mkdir -p /usr/share/zoneinfo/Asia /usr/share/zoneinfo/America && \
+    cp /tmp/Shanghai /usr/share/zoneinfo/Asia/ && \
+    cp /tmp/New_York /usr/share/zoneinfo/America/
+
+# Create app user
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -u 1001 -S appuser -G appgroup
+
+# Set working directory
+WORKDIR /app
+
+# Copy binary from builder stage
+COPY --from=builder /app/stock-data-collector .
+
+# Copy static files and data
+COPY --from=builder /app/static ./static
+COPY --from=builder /app/stocks.csv .
+
+# Create data directory
+RUN mkdir -p data && chown -R appuser:appgroup /app
+
+# Switch to non-root user
+USER appuser
+
+# Expose port
+EXPOSE 8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/api/stocks || exit 1
+
+# Default command - start web server with scheduler enabled
+CMD ["./stock-data-collector", "-mode=web", "-port=8080", "-scheduler=true"]

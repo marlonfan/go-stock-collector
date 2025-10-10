@@ -1,0 +1,194 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v1.0.0)'
+        required: true
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+
+    permissions:
+      contents: write
+      packages: write
+
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      version: ${{ steps.get_version.outputs.version }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Get version
+      id: get_version
+      run: |
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          VERSION="${{ github.event.inputs.version }}"
+        else
+          VERSION="${GITHUB_REF#refs/tags/}"
+        fi
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Release version: $VERSION"
+
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.get_version.outputs.version }}
+        release_name: Release ${{ steps.get_version.outputs.version }}
+        body: |
+          ## 🚀 Release ${{ steps.get_version.outputs.version }}
+
+          ### 🐳 Docker Images
+          - `ghcr.io/${{ github.repository }}:${{ steps.get_version.outputs.version }}`
+          - `ghcr.io/${{ github.repository }}:latest`
+
+          ### 📦 Installation
+          ```bash
+          # Using Docker Compose
+          curl -sSL https://raw.githubusercontent.com/${{ github.repository }}/main/docker-compose.yml | docker-compose -f - up -d
+
+          # Using Docker
+          docker run -d --name stock-data-collector \
+            -p 8080:8080 \
+            -v $(pwd)/data:/app/data \
+            ghcr.io/${{ github.repository }}:${{ steps.get_version.outputs.version }}
+          ```
+
+          ### 🔧 Changes
+          Auto-generated release from tag ${{ steps.get_version.outputs.version }}
+        draft: false
+        prerelease: false
+
+  build-and-push-release:
+    name: Build and Push Release Images
+    runs-on: ubuntu-latest
+    needs: create-release
+
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      matrix:
+        include:
+          - platform: linux/amd64
+          - platform: linux/arm64
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
+          type=raw,value=latest
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: ${{ matrix.platform }}
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  build-binaries:
+    name: Build Release Binaries
+    runs-on: ubuntu-latest
+    needs: create-release
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+
+    - name: Build binary
+      env:
+        GOOS: ${{ matrix.goos }}
+        GOARCH: ${{ matrix.goarch }}
+        CGO_ENABLED: 1
+        VERSION: ${{ needs.create-release.outputs.version }}
+      run: |
+        # Set output file name based on OS
+        if [ "$GOOS" = "windows" ]; then
+          OUTPUT="stock-data-collector-${{ needs.create-release.outputs.version }}-${GOOS}-${GOARCH}.exe"
+        else
+          OUTPUT="stock-data-collector-${{ needs.create-release.outputs.version }}-${GOOS}-${GOARCH}"
+        fi
+
+        # Build with version info
+        go build \
+          -ldflags "-X main.version=$VERSION -X main.buildTime=$(date -u '+%Y-%m-%d_%H:%M:%S')" \
+          -o "$OUTPUT" \
+          .
+
+        # Create archive
+        if [ "$GOOS" = "windows" ]; then
+          zip "${OUTPUT%.exe}.zip" "$OUTPUT"
+        else
+          tar -czf "${OUTPUT}.tar.gz" "$OUTPUT"
+        fi
+
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload_url }}
+        asset_path: |
+          ${{ matrix.goos == 'windows' && format('stock-data-collector-{0}-{1}-{2}.zip', needs.create-release.outputs.version, matrix.goos, matrix.goarch) || format('stock-data-collector-{0}-{1}-{2}.tar.gz', needs.create-release.outputs.version, matrix.goos, matrix.goarch) }}
+        asset_name: |
+          ${{ matrix.goos == 'windows' && format('stock-data-collector-{0}-{1}-{2}.zip', needs.create-release.outputs.version, matrix.goos, matrix.goarch) || format('stock-data-collector-{0}-{1}-{2}.tar.gz', needs.create-release.outputs.version, matrix.goos, matrix.goarch) }}
+        asset_content_type: application/octet-stream
