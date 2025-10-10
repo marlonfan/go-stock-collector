@@ -1,8 +1,8 @@
 # Build stage
-FROM golang:1.21-alpine AS builder
+FROM golang:1.23-alpine AS builder
 
-# Install build dependencies
-RUN apk add --no-cache gcc musl-dev sqlite-dev tzdata
+# Install build dependencies (only tzdata needed now)
+RUN apk add --no-cache tzdata
 
 # Set working directory
 WORKDIR /app
@@ -16,11 +16,11 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build the application
-ENV CGO_ENABLED=1
+# Build the application (no CGO needed with modernc.org/sqlite)
+ENV CGO_ENABLED=0
 ENV GOOS=linux
 ENV GOARCH=amd64
-RUN go build -ldflags "-extldflags -static" -a -installsuffix cgo -o stock-data-collector .
+RUN go build -ldflags="-s -w" -o stock-data-collector .
 
 # Final stage
 FROM alpine:latest

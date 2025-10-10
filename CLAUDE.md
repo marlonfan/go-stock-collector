@@ -14,37 +14,51 @@
 go mod tidy
 
 # Web 模式运行（默认，在 8080 端口启动 Web 服务器）
-CGO_ENABLED=1 go run .
+go run .
 
 # CLI 模式运行
-CGO_ENABLED=1 go run . -mode=cli -symbol=TSLA -days=30 -action=collect
+go run . -mode=cli -symbol=TSLA -days=30 -action=collect
 
 # 构建应用
-CGO_ENABLED=1 go build -o stock-data-collector
+go build -o stock-data-collector
 ```
 
 ### CLI 操作
 ```bash
 # 收集股票数据
-CGO_ENABLED=1 go run . -mode=cli -symbol=TSLA -days=30 -action=collect
+go run . -mode=cli -symbol=TSLA -days=30 -action=collect
 
 # 分析现有数据
-CGO_ENABLED=1 go run . -mode=cli -symbol=TSLA -action=analyze
+go run . -mode=cli -symbol=TSLA -action=analyze
 
 # 显示样本数据
-CGO_ENABLED=1 go run . -mode=cli -symbol=TSLA -action=sample
+go run . -mode=cli -symbol=TSLA -action=sample
 ```
 
 ### Web 模式
 ```bash
-# 启动 Web 服务器（默认 8080 端口）
-CGO_ENABLED=1 go run . -mode=web
+# 启动 Web 服务器（默认 8080 端口，启用定时更新）
+go run . -mode=web
 
 # 自定义端口
-CGO_ENABLED=1 go run . -mode=web -port=3000
+go run . -mode=web -port=3000
+
+# 禁用定时更新（仅手动同步）
+go run . -mode=web -scheduler=false
 ```
 
-**重要**: 所有命令都需要 `CGO_ENABLED=1`，因为 SQLite 驱动依赖 CGO。
+### 定时更新功能
+Web 模式默认启用定时更新功能，每天中国时间早上 8:00 自动同步所有监控列表中的股票数据。
+
+**特性**：
+- 使用中国时区（Asia/Shanghai, UTC+8）
+- 每天 8:00 AM 自动更新所有监控股票
+- 智能增量更新（自动判断需要获取的天数）
+- 使用 `github.com/robfig/cron/v3` 实现调度
+
+**控制选项**：
+- `-scheduler=true`：启用定时更新（默认）
+- `-scheduler=false`：禁用定时更新，仅手动同步
 
 ## 架构设计
 
@@ -76,11 +90,19 @@ CGO_ENABLED=1 go run . -mode=web -port=3000
 - 支持模糊匹配：精确匹配、前缀匹配、拼音首字母、子串匹配
 - 内置常见股票的中文-拼音映射（AAPL→苹果、TSLA→特斯拉等）
 
+**定时调度器 (scheduler.go)**:
+- 使用 `github.com/robfig/cron/v3` 实现定时任务调度
+- 配置为中国时区（Asia/Shanghai, UTC+8）
+- 每天早上 8:00 自动更新所有监控列表中的股票
+- 支持优雅关闭（在 Web 服务器关闭时自动停止）
+- 可通过命令行参数 `-scheduler` 启用/禁用
+
 ### 数据流
 
 1. **CLI 模式**: 用户运行命令 → StockCollector 从 Yahoo 获取 → Database 存储/去重 → 分析/显示
 2. **Web 模式**: 前端调用 API → Handler 验证 → StockCollector/Database 操作 → JSON 响应
 3. **日线汇总**: 分钟K线 → 按日期分组 → 计算 OHLCV → 存储到 daily_summary 表
+4. **定时更新**: Scheduler (cron) → 每天 8:00 AM → 遍历监控股票 → StockCollector 增量更新 → 更新同步时间
 
 ### 关键文件
 - `models.go`: API 请求/响应和领域对象的数据结构
@@ -135,7 +157,7 @@ CGO_ENABLED=1 go run . -mode=web -port=3000
 
 #### 手动触发更新
 数据**不会自动更新**，需要手动触发：
-- CLI: `CGO_ENABLED=1 go run . -mode=cli -symbol=TSLA -action=collect`
+- CLI: `go run . -mode=cli -symbol=TSLA -action=collect`
 - Web: 点击 "Sync Data" 按钮（调用 `POST /api/stocks/{symbol}/sync`）
 
 #### 智能增量更新 (stock_collector.go:37-75)
@@ -204,13 +226,15 @@ CGO_ENABLED=1 go run . -mode=web -port=3000
 ### 依赖项
 - `github.com/gin-gonic/gin`: Web 框架
 - `github.com/go-resty/resty/v2`: Yahoo Finance 的 HTTP 客户端
-- `github.com/mattn/go-sqlite3`: SQLite 驱动（需要 CGO）
+- `modernc.org/sqlite`: 纯 Go 实现的 SQLite 驱动（无需 CGO）
+- `github.com/robfig/cron/v3`: Cron 定时任务调度器
 
 ### 构建说明
-- SQLite 支持需要 `CGO_ENABLED=1`
-- 使用 `go build` 或 `go run` 时启用 CGO
+- 使用纯 Go 实现的 SQLite 驱动 (`modernc.org/sqlite`)，无需 CGO
+- 可以使用 `CGO_ENABLED=0` 进行静态编译
 - SQLite 数据库不存在时自动创建
 - 所有价格四舍五入到 2 位小数以避免浮点精度问题
+- Docker 镜像构建无需安装 gcc 等 C 编译工具
 
 ## 开发注意事项
 
@@ -236,7 +260,7 @@ CGO_ENABLED=1 go run . -mode=web -port=3000
 
 ## 未来扩展建议
 
-- 添加定时任务（cron）在每日收盘后自动同步
+- ~~添加定时任务（cron）在每日收盘后自动同步~~ ✅ 已实现（每天中国时间 8:00 AM）
 - 实现 WebSocket 实时数据推送
 - 添加技术指标计算（MA、RSI、MACD等）
 - 支持更多数据源（Alpha Vantage、IEX Cloud）

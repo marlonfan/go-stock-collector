@@ -15,11 +15,12 @@ func main() {
 	dbPath := flag.String("db", "stock_data.db", "Database file path (default: stock_data.db)")
 	action := flag.String("action", "collect", "Action: collect, analyze, sample")
 	port := flag.String("port", "8080", "Web server port (default: 8080)")
+	enableScheduler := flag.Bool("scheduler", true, "Enable scheduled updates at 8:00 AM China time (default: true)")
 	flag.Parse()
 
 	switch *mode {
 	case "web":
-		runWebMode(*port, *dbPath)
+		runWebMode(*port, *dbPath, *enableScheduler)
 	case "cli":
 		runCLIMode(*symbol, *days, *dbPath, *action)
 	default:
@@ -27,13 +28,18 @@ func main() {
 	}
 }
 
-func runWebMode(port, dbPath string) {
+func runWebMode(port, dbPath string, enableScheduler bool) {
 	log.Println("=== Stock Tracker Web Server ===")
 	log.Printf("Database: %s", dbPath)
 	log.Printf("Server will start on http://localhost:%s", port)
+	if enableScheduler {
+		log.Println("Scheduled updates: Enabled (8:00 AM China time daily)")
+	} else {
+		log.Println("Scheduled updates: Disabled")
+	}
 
 	// Initialize web server
-	server, err := NewWebServer(dbPath)
+	server, err := NewWebServer(dbPath, enableScheduler)
 	if err != nil {
 		log.Fatalf("Failed to initialize web server: %v", err)
 	}

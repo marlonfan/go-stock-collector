@@ -8,10 +8,11 @@ import (
 
 type WebServer struct {
 	collector *StockCollector
+	scheduler *Scheduler
 	router    *gin.Engine
 }
 
-func NewWebServer(dbPath string) (*WebServer, error) {
+func NewWebServer(dbPath string, enableScheduler bool) (*WebServer, error) {
 	collector, err := NewStockCollector(dbPath)
 	if err != nil {
 		return nil, err
@@ -24,6 +25,17 @@ func NewWebServer(dbPath string) (*WebServer, error) {
 	server := &WebServer{
 		collector: collector,
 		router:    router,
+	}
+
+	// Initialize scheduler if enabled
+	if enableScheduler {
+		scheduler, err := NewScheduler(collector, collector.database)
+		if err != nil {
+			log.Printf("Warning: Failed to initialize scheduler: %v", err)
+		} else {
+			server.scheduler = scheduler
+			scheduler.Start()
+		}
 	}
 
 	server.setupRoutes()
@@ -60,6 +72,9 @@ func (ws *WebServer) Run(addr string) error {
 }
 
 func (ws *WebServer) Close() {
+	if ws.scheduler != nil {
+		ws.scheduler.Stop()
+	}
 	if ws.collector != nil {
 		ws.collector.Close()
 	}
