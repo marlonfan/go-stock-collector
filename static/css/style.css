@@ -533,3 +533,181 @@ tr.pinned-row:hover {
 .pin-icon:hover {
   filter: drop-shadow(0 0 3px rgba(255, 204, 0, 0.5));
 }
+
+/* Chart Modal Styles */
+.chart-modal-container {
+  background: white;
+  border-radius: 20px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+}
+
+.dark .chart-modal-container {
+  background: #1c1c1e;
+}
+
+.chart-canvas-container {
+  background: #f8fafc;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+}
+
+.dark .chart-canvas-container {
+  background: #0f0f11;
+  border-color: #374151;
+}
+
+#candlestickChart {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+/* Chart period selector styling */
+.chart-period-selector {
+  background: white;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 14px;
+  color: #374151;
+  transition: all 0.2s ease;
+}
+
+.chart-period-selector:hover {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.chart-period-selector:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+}
+
+.dark .chart-period-selector {
+  background: #374151;
+  border-color: #4b5563;
+  color: #f9fafb;
+}
+
+.dark .chart-period-selector:hover {
+  border-color: #60a5fa;
+}
+
+.dark .chart-period-selector:focus {
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.2);
+}
+
+/* Chart refresh button */
+.chart-refresh-btn {
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+.chart-refresh-btn:hover {
+  background: #2563eb;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+.chart-refresh-btn:active {
+  transform: translateY(0);
+}
+
+.chart-refresh-btn:disabled {
+  background: #9ca3af;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* Chart stats styling */
+.chart-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+
+@media (min-width: 768px) {
+  .chart-stats-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+.chart-stat-item {
+  background: #f8fafc;
+  border-radius: 12px;
+  padding: 16px;
+  border: 1px solid #e2e8f0;
+  transition: all 0.2s ease;
+}
+
+.chart-stat-item:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.dark .chart-stat-item {
+  background: #0f0f11;
+  border-color: #374151;
+}
+
+.chart-stat-label {
+  font-size: 12px;
+  color: #6b7280;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.dark .chart-stat-label {
+  color: #9ca3af;
+}
+
+.chart-stat-value {
+  font-size: 18px;
+  font-weight: 600;
+  color: #111827;
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+}
+
+.dark .chart-stat-value {
+  color: #f9fafb;
+}
+
+/* Loading animation for chart */
+.chart-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 400px;
+  background: #f8fafc;
+  border-radius: 12px;
+}
+
+.dark .chart-loading {
+  background: #0f0f11;
+}
+
+.chart-loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid #e5e7eb;
+  border-top: 3px solid #3b82f6;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.dark .chart-loading-spinner {
+  border-color: #374151;
+  border-top-color: #60a5fa;
+}

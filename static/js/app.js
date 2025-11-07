@@ -608,7 +608,11 @@ class StockTracker {
                                     <td class="sticky left-0 bg-white dark:bg-gray-800 p-4 border-r border-gray-200 dark:border-gray-700">
                                         <div class="flex items-center justify-between">
                                             <div>
-                                                <div class="font-semibold text-gray-900 dark:text-gray-100">${symbol}</div>
+                                                <div class="font-semibold text-gray-900 dark:text-gray-100 cursor-pointer hover:text-blue-600 transition-colors"
+                                                     onclick="stockTracker.showChartModal('${symbol}')"
+                                                     title="Click to view chart">
+                                                    ${symbol}
+                                                </div>
                                                 <div class="text-xs text-gray-500 dark:text-gray-400">${stock.name || ''}</div>
                                                 <div class="text-sm font-medium mt-1 ${stock.change >= 0 ? 'text-red-600' : 'text-green-600'}">
                                                     ${this.formatPrice(stock.currentPrice)}
@@ -781,6 +785,238 @@ class StockTracker {
 
         this.hideSearchResults();
         symbolInput.focus();
+    }
+
+    // K-line Chart Modal Methods
+    async showChartModal(symbol) {
+        const modal = document.getElementById('chartModal');
+        const chartTitle = document.getElementById('chartTitle');
+        const chartSubtitle = document.getElementById('chartSubtitle');
+
+        const stock = this.stocks.get(symbol);
+        if (stock) {
+            chartTitle.textContent = `${symbol} - ${stock.name || 'Stock Chart'}`;
+            chartSubtitle.textContent = `Historical performance`;
+        }
+
+        modal.classList.remove('hidden');
+
+        // Load initial chart data
+        await this.loadChartData(symbol);
+
+        // Setup event listeners for the modal
+        this.setupChartModalEventListeners(symbol);
+    }
+
+    hideChartModal() {
+        document.getElementById('chartModal').classList.add('hidden');
+    }
+
+    setupChartModalEventListeners(symbol) {
+        const periodSelect = document.getElementById('chartPeriod');
+        const refreshBtn = document.getElementById('refreshChart');
+
+        // Remove existing listeners to avoid duplicates
+        periodSelect.replaceWith(periodSelect.cloneNode(true));
+        refreshBtn.replaceWith(refreshBtn.cloneNode(true));
+
+        // Re-select the elements after cloning
+        const newPeriodSelect = document.getElementById('chartPeriod');
+        const newRefreshBtn = document.getElementById('refreshChart');
+
+        newPeriodSelect.addEventListener('change', () => {
+            this.loadChartData(symbol);
+        });
+
+        newRefreshBtn.addEventListener('click', () => {
+            this.loadChartData(symbol);
+        });
+
+        // Close modal on backdrop click
+        const modal = document.getElementById('chartModal');
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                this.hideChartModal();
+            }
+        });
+    }
+
+    async loadChartData(symbol) {
+        try {
+            const period = parseInt(document.getElementById('chartPeriod').value);
+            const response = await fetch(`/api/stocks/${symbol}/data?days=${period}`);
+            const data = await response.json();
+
+            if (data.data && data.data.length > 0) {
+                this.drawCandlestickChart(data.data, symbol);
+                this.updateChartStats(data.data);
+            } else {
+                this.showNoChartData();
+            }
+        } catch (error) {
+            console.error('Failed to load chart data:', error);
+            this.showChartError('Failed to load chart data');
+        }
+    }
+
+    drawCandlestickChart(data, symbol) {
+        const canvas = document.getElementById('candlestickChart');
+        const ctx = canvas.getContext('2d');
+
+        // Set canvas size for better resolution
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width * window.devicePixelRatio;
+        canvas.height = 400 * window.devicePixelRatio;
+        ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+        // Clear canvas
+        ctx.clearRect(0, 0, rect.width, 400);
+
+        if (data.length === 0) return;
+
+        const padding = { top: 20, right: 60, bottom: 40, left: 10 };
+        const chartWidth = rect.width - padding.left - padding.right;
+        const chartHeight = 400 - padding.top - padding.bottom;
+
+        // Calculate price range
+        let minPrice = Infinity, maxPrice = -Infinity;
+        data.forEach(item => {
+            minPrice = Math.min(minPrice, item.low);
+            maxPrice = Math.max(maxPrice, item.high);
+        });
+
+        // Add some padding to the price range
+        const priceRange = maxPrice - minPrice;
+        minPrice -= priceRange * 0.05;
+        maxPrice += priceRange * 0.05;
+
+        const candleWidth = Math.max(1, (chartWidth / data.length) * 0.6);
+        const candleSpacing = (chartWidth / data.length);
+
+        // Check for dark mode
+        const isDarkMode = document.documentElement.classList.contains('dark');
+
+        // Draw grid lines
+        ctx.strokeStyle = isDarkMode ? '#374151' : '#e5e7eb';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2, 2]);
+
+        // Horizontal grid lines (price levels)
+        for (let i = 0; i <= 5; i++) {
+            const y = padding.top + (chartHeight / 5) * i;
+            ctx.beginPath();
+            ctx.moveTo(padding.left, y);
+            ctx.lineTo(padding.left + chartWidth, y);
+            ctx.stroke();
+
+            // Price labels
+            const price = maxPrice - ((maxPrice - minPrice) / 5) * i;
+            ctx.fillStyle = isDarkMode ? '#9ca3af' : '#6b7280';
+            ctx.font = '11px sans-serif';
+            ctx.textAlign = 'right';
+            ctx.fillText(this.formatPrice(price), padding.left + chartWidth + 5, y + 4);
+        }
+
+        ctx.setLineDash([]);
+
+        // Draw candlesticks
+        data.forEach((item, index) => {
+            const x = padding.left + candleSpacing * index + candleSpacing / 2;
+            const openY = padding.top + chartHeight * ((maxPrice - item.open) / (maxPrice - minPrice));
+            const closeY = padding.top + chartHeight * ((maxPrice - item.close) / (maxPrice - minPrice));
+            const highY = padding.top + chartHeight * ((maxPrice - item.high) / (maxPrice - minPrice));
+            const lowY = padding.top + chartHeight * ((maxPrice - item.low) / (maxPrice - minPrice));
+
+            const isRising = item.close >= item.open;
+
+            // Draw high-low line
+            ctx.strokeStyle = isRising ? '#10b981' : '#ef4444';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(x, highY);
+            ctx.lineTo(x, lowY);
+            ctx.stroke();
+
+            // Draw candle body
+            const bodyTop = Math.min(openY, closeY);
+            const bodyHeight = Math.abs(closeY - openY);
+
+            if (isRising) {
+                // Rising candle - hollow
+                ctx.strokeStyle = '#10b981';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(x - candleWidth / 2, bodyTop, candleWidth, Math.max(1, bodyHeight));
+            } else {
+                // Falling candle - filled
+                ctx.fillStyle = '#ef4444';
+                ctx.fillRect(x - candleWidth / 2, bodyTop, candleWidth, Math.max(1, bodyHeight));
+            }
+
+            // Draw date labels for every nth candle (avoid overcrowding)
+            const labelInterval = Math.ceil(50 / candleSpacing);
+            if (index % labelInterval === 0 || index === data.length - 1) {
+                ctx.save();
+                ctx.translate(x, padding.top + chartHeight + 15);
+                ctx.rotate(-Math.PI / 4);
+                ctx.fillStyle = isDarkMode ? '#9ca3af' : '#6b7280';
+                ctx.font = '10px sans-serif';
+                ctx.textAlign = 'right';
+                ctx.fillText(this.formatChartDate(item.timestamp), 0, 0);
+                ctx.restore();
+            }
+        });
+
+        // Draw title
+        ctx.fillStyle = isDarkMode ? '#f3f4f6' : '#111827';
+        ctx.font = 'bold 14px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(`${symbol} - ${document.getElementById('chartPeriod').value} Days`, padding.left, padding.top - 5);
+    }
+
+    updateChartStats(data) {
+        if (data.length === 0) return;
+
+        const latest = data[data.length - 1];
+        const oldest = data[0];
+
+        document.getElementById('chartOpen').textContent = this.formatPrice(oldest.open);
+        document.getElementById('chartHigh').textContent = this.formatPrice(Math.max(...data.map(d => d.high)));
+        document.getElementById('chartLow').textContent = this.formatPrice(Math.min(...data.map(d => d.low)));
+        document.getElementById('chartClose').textContent = this.formatPrice(latest.close);
+    }
+
+    showNoChartData() {
+        const canvas = document.getElementById('candlestickChart');
+        const ctx = canvas.getContext('2d');
+        const rect = canvas.getBoundingClientRect();
+
+        ctx.clearRect(0, 0, rect.width, 400);
+        ctx.fillStyle = '#6b7280';
+        ctx.font = '16px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('No chart data available', rect.width / 2, 200);
+
+        // Reset stats
+        ['chartOpen', 'chartHigh', 'chartLow', 'chartClose'].forEach(id => {
+            document.getElementById(id).textContent = '-';
+        });
+    }
+
+    showChartError(message) {
+        const canvas = document.getElementById('candlestickChart');
+        const ctx = canvas.getContext('2d');
+        const rect = canvas.getBoundingClientRect();
+
+        ctx.clearRect(0, 0, rect.width, 400);
+        ctx.fillStyle = '#ef4444';
+        ctx.font = '16px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(message, rect.width / 2, 200);
+    }
+
+    formatChartDate(timestamp) {
+        const date = new Date(timestamp);
+        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     }
 
     // Pinning functionality methods
