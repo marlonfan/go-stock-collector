@@ -58,7 +58,7 @@ func (d *Database) InsertMinuteData(bars []MinuteBar) error {
 		return nil
 	}
 
-	// Convert MinuteBar to StockMinuteData models
+		// Convert MinuteBar to StockMinuteData models
 	var stockData []StockMinuteData
 	for _, bar := range bars {
 		stockData = append(stockData, StockMinuteData{
@@ -83,6 +83,7 @@ func (d *Database) InsertMinuteData(bars []MinuteBar) error {
 			}
 
 			batch := stockData[i:end]
+
 			for _, data := range batch {
 				// Use OnConflict to handle INSERT OR REPLACE
 				result := tx.Where("symbol = ? AND timestamp = ?", data.Symbol, data.Timestamp).

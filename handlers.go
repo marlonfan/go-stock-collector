@@ -197,8 +197,26 @@ func (ws *WebServer) syncStockData(c *gin.Context) {
 	days := 30
 	latestTimestamp, _ := ws.collector.database.GetLatestTimestamp(symbol)
 	if !latestTimestamp.IsZero() {
-		daysSinceLatest := int(time.Since(latestTimestamp).Hours() / 24)
-		if daysSinceLatest > 0 && daysSinceLatest <= 7 {
+		// Calculate how many days we need to fetch
+		// Add 1 to ensure we re-fetch the last day completely (in case it was incomplete)
+		daysSinceLatest := int(time.Since(latestTimestamp).Hours()/24) + 1
+
+		// If the last data is very recent (less than 1 day old), check if it's a trading day
+		now := time.Now()
+		if daysSinceLatest == 1 {
+			// Check if we're on the same calendar day (in any timezone)
+			if latestTimestamp.Year() == now.Year() &&
+			   latestTimestamp.YearDay() == now.YearDay() {
+				// Same day - always re-fetch to ensure completeness
+				days = 1
+			} else {
+				// Different day - fetch since the day of latest data
+				days = daysSinceLatest
+			}
+		} else if daysSinceLatest <= 0 {
+			// This shouldn't happen with the +1 above, but keep as safety check
+			days = 1
+		} else {
 			days = daysSinceLatest
 		}
 	}
