@@ -85,36 +85,16 @@ func (d *Database) InsertMinuteData(bars []MinuteBar) error {
 			batch := stockData[i:end]
 
 			for _, data := range batch {
-				// Use OnConflict to handle INSERT OR REPLACE
-				result := tx.Where("symbol = ? AND timestamp = ?", data.Symbol, data.Timestamp).
-					FirstOrCreate(&data, StockMinuteData{
-						Symbol:    data.Symbol,
-						Timestamp: data.Timestamp,
-						Open:      data.Open,
-						High:      data.High,
-						Low:       data.Low,
-						Close:     data.Close,
-						Volume:    data.Volume,
-					})
+				// Use raw SQL with INSERT OR REPLACE to handle conflicts properly
+				result := tx.Exec(`
+					INSERT OR REPLACE INTO stock_minute_data
+					(symbol, timestamp, open, high, low, close, volume, created_at, updated_at)
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+					data.Symbol, data.Timestamp, data.Open, data.High, data.Low, data.Close, data.Volume,
+					time.Now(), time.Now())
 
 				if result.Error != nil {
 					return fmt.Errorf("failed to insert bar %s %s: %v", data.Symbol, data.Timestamp, result.Error)
-				}
-
-				// If record already exists, update it
-				if result.RowsAffected == 0 {
-					updateResult := tx.Model(&StockMinuteData{}).
-						Where("symbol = ? AND timestamp = ?", data.Symbol, data.Timestamp).
-						Updates(map[string]interface{}{
-							"open":   data.Open,
-							"high":   data.High,
-							"low":    data.Low,
-							"close":  data.Close,
-							"volume": data.Volume,
-						})
-					if updateResult.Error != nil {
-						return fmt.Errorf("failed to update bar %s %s: %v", data.Symbol, data.Timestamp, updateResult.Error)
-					}
 				}
 			}
 		}
