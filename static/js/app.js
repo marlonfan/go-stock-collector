@@ -2,6 +2,10 @@
 class StockTracker {
     constructor() {
         this.stocks = new Map();
+        this.chartCache = new Map();
+        this.currentChartRequest = null;
+        this.currentChartSymbol = null;
+        this.chartModalClickHandler = null;
         this.init();
     }
 
@@ -799,6 +803,7 @@ class StockTracker {
             chartSubtitle.textContent = `Historical performance`;
         }
 
+        this.currentChartSymbol = symbol;
         modal.classList.remove('hidden');
 
         // Load initial chart data
@@ -809,7 +814,12 @@ class StockTracker {
     }
 
     hideChartModal() {
-        document.getElementById('chartModal').classList.add('hidden');
+        const modal = document.getElementById('chartModal');
+        modal.classList.add('hidden');
+        this.abortActiveChartRequest();
+        this.setChartControlsDisabled(false);
+        this.hideChartLoading();
+        this.currentChartSymbol = null;
     }
 
     setupChartModalEventListeners(symbol) {
@@ -825,37 +835,94 @@ class StockTracker {
         const newRefreshBtn = document.getElementById('refreshChart');
 
         newPeriodSelect.addEventListener('change', () => {
-            this.loadChartData(symbol);
+            this.loadChartData(symbol, { forceRefresh: true });
         });
 
         newRefreshBtn.addEventListener('click', () => {
-            this.loadChartData(symbol);
+            this.loadChartData(symbol, { forceRefresh: true });
         });
 
         // Close modal on backdrop click
         const modal = document.getElementById('chartModal');
-        modal.addEventListener('click', (e) => {
+        if (this.chartModalClickHandler) {
+            modal.removeEventListener('click', this.chartModalClickHandler);
+        }
+
+        this.chartModalClickHandler = (e) => {
             if (e.target === modal) {
                 this.hideChartModal();
             }
-        });
+        };
+
+        modal.addEventListener('click', this.chartModalClickHandler);
     }
 
-    async loadChartData(symbol) {
-        try {
-            const period = parseInt(document.getElementById('chartPeriod').value);
-            const response = await fetch(`/api/stocks/${symbol}/data?days=${period}`);
-            const data = await response.json();
+    async loadChartData(symbol, options = {}) {
+        const { forceRefresh = false } = options;
+        let requestToken = null;
 
-            if (data.data && data.data.length > 0) {
-                this.drawCandlestickChart(data.data, symbol);
-                this.updateChartStats(data.data);
-            } else {
-                this.showNoChartData();
+        try {
+            const periodSelect = document.getElementById('chartPeriod');
+            const period = parseInt(periodSelect?.value, 10) || 30;
+            const cacheKey = `${symbol}-${period}`;
+            const cachedSeries = this.chartCache.get(cacheKey);
+            const shouldShowLoading = forceRefresh || !cachedSeries;
+
+            if (shouldShowLoading) {
+                this.showChartLoading();
+            } else if (cachedSeries) {
+                this.hideChartLoading();
+                this.drawCandlestickChart(cachedSeries, symbol);
+                this.updateChartStats(cachedSeries);
             }
+
+            this.abortActiveChartRequest();
+
+            const controller = new AbortController();
+            requestToken = Symbol('chart-request');
+            this.currentChartRequest = { controller, symbol, cacheKey, requestToken };
+            this.setChartControlsDisabled(true);
+
+            const response = await fetch(`/api/stocks/${symbol}/data?days=${period}`, {
+                signal: controller.signal,
+            });
+            if (!response.ok) {
+                throw new Error('Failed to load chart data');
+            }
+
+            const data = await response.json();
+            const series = data.data || [];
+
+            if (!this.currentChartRequest || this.currentChartRequest.requestToken !== requestToken) {
+                return;
+            }
+
+            if (series.length === 0) {
+                this.chartCache.delete(cacheKey);
+                this.showNoChartData();
+                return;
+            }
+
+            this.chartCache.set(cacheKey, series);
+            this.hideChartLoading();
+            this.drawCandlestickChart(series, symbol);
+            this.updateChartStats(series);
         } catch (error) {
+            if (error.name === 'AbortError') {
+                return;
+            }
             console.error('Failed to load chart data:', error);
             this.showChartError('Failed to load chart data');
+        } finally {
+            if (
+                requestToken &&
+                this.currentChartRequest &&
+                this.currentChartRequest.requestToken === requestToken
+            ) {
+                this.setChartControlsDisabled(false);
+                this.hideChartLoading();
+                this.currentChartRequest = null;
+            }
         }
     }
 
@@ -986,6 +1053,7 @@ class StockTracker {
     }
 
     showNoChartData() {
+        this.hideChartLoading();
         const canvas = document.getElementById('candlestickChart');
         const ctx = canvas.getContext('2d');
         const rect = canvas.getBoundingClientRect();
@@ -1003,6 +1071,7 @@ class StockTracker {
     }
 
     showChartError(message) {
+        this.hideChartLoading();
         const canvas = document.getElementById('candlestickChart');
         const ctx = canvas.getContext('2d');
         const rect = canvas.getBoundingClientRect();
@@ -1012,6 +1081,60 @@ class StockTracker {
         ctx.font = '16px sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText(message, rect.width / 2, 200);
+    }
+
+    showChartLoading() {
+        const container = document.querySelector('.chart-canvas-container');
+        const canvas = document.getElementById('candlestickChart');
+        if (!container || !canvas) return;
+
+        let loadingEl = container.querySelector('.chart-loading');
+        if (!loadingEl) {
+            loadingEl = document.createElement('div');
+            loadingEl.className = 'chart-loading';
+            loadingEl.innerHTML = '<div class="chart-loading-spinner"></div>';
+            container.appendChild(loadingEl);
+        }
+
+        canvas.style.display = 'none';
+        loadingEl.classList.remove('hidden');
+    }
+
+    hideChartLoading() {
+        const container = document.querySelector('.chart-canvas-container');
+        const canvas = document.getElementById('candlestickChart');
+        if (canvas) {
+            canvas.style.display = 'block';
+        }
+        if (!container) return;
+
+        const loadingEl = container.querySelector('.chart-loading');
+        if (loadingEl) {
+            loadingEl.remove();
+        }
+    }
+
+    setChartControlsDisabled(disabled) {
+        const periodSelect = document.getElementById('chartPeriod');
+        const refreshBtn = document.getElementById('refreshChart');
+
+        [periodSelect, refreshBtn].forEach((el) => {
+            if (el) {
+                el.disabled = disabled;
+                el.classList.toggle('opacity-50', disabled);
+            }
+        });
+
+        if (refreshBtn) {
+            refreshBtn.setAttribute('aria-busy', disabled);
+        }
+    }
+
+    abortActiveChartRequest() {
+        if (this.currentChartRequest?.controller) {
+            this.currentChartRequest.controller.abort();
+        }
+        this.currentChartRequest = null;
     }
 
     formatChartDate(timestamp) {
