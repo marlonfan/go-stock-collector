@@ -368,3 +368,73 @@ func (y *YahooFinanceClient) GetDailyHistory(symbol, rangeStr string) ([]DailyBa
 	log.Printf("Fetched %d daily bars for %s", len(bars), symbol)
 	return bars, nil
 }
+
+// yahooSearchResp matches the subset of Yahoo's /v1/finance/search response
+// we care about. Many other fields exist (news, lists, hits, etc.) but they're
+// not needed for symbol search.
+type yahooSearchResp struct {
+	Quotes []struct {
+		Symbol    string `json:"symbol"`
+		Shortname string `json:"shortname"`
+		Longname  string `json:"longname"`
+		QuoteType string `json:"quoteType"`
+		ExchDisp  string `json:"exchDisp"`
+	} `json:"quotes"`
+}
+
+// SearchSymbols hits Yahoo's public search endpoint. Returns up to `limit`
+// matches across global exchanges (NYSE/NASDAQ/HKEX/TSE/SSE/etc.) filtered to
+// instrument types worth tracking. No API key needed.
+func (y *YahooFinanceClient) SearchSymbols(query string, limit int) ([]StockSearchResult, error) {
+	if limit <= 0 {
+		limit = 15
+	}
+	url := fmt.Sprintf(
+		"https://query1.finance.yahoo.com/v1/finance/search?q=%s&quotesCount=%d&newsCount=0&enableFuzzyQuery=false",
+		strings.ReplaceAll(query, " ", "+"),
+		limit,
+	)
+
+	resp, err := y.client.R().Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("yahoo search failed: %v", err)
+	}
+	if resp.StatusCode() != 200 {
+		return nil, fmt.Errorf("yahoo search HTTP %d", resp.StatusCode())
+	}
+
+	var parsed yahooSearchResp
+	if err := json.Unmarshal(resp.Body(), &parsed); err != nil {
+		return nil, fmt.Errorf("yahoo search parse: %v", err)
+	}
+
+	out := make([]StockSearchResult, 0, len(parsed.Quotes))
+	for _, q := range parsed.Quotes {
+		if q.Symbol == "" {
+			continue
+		}
+		// Filter to instrument types our app actually plots: regular equities,
+		// ETFs, and indices. Skip futures/options/currencies/crypto.
+		switch q.QuoteType {
+		case "EQUITY", "ETF", "INDEX", "MUTUALFUND":
+		default:
+			continue
+		}
+
+		name := q.Shortname
+		if name == "" {
+			name = q.Longname
+		}
+		full := name
+		if q.ExchDisp != "" {
+			full = fmt.Sprintf("%s · %s", name, q.ExchDisp)
+		}
+
+		out = append(out, StockSearchResult{
+			Symbol:   q.Symbol,
+			Name:     name,
+			FullName: full,
+		})
+	}
+	return out, nil
+}

@@ -408,24 +408,68 @@ func (ws *WebServer) searchStocks(c *gin.Context) {
 		return
 	}
 
-	// 初始化搜索服务
-	searchService, err := NewStockSearchService()
-	if err != nil {
-		fmt.Printf("Error initializing search service: %v\n", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to initialize search service"})
+	const totalLimit = 15
+
+	// Hit local CSV (Chinese-name aware, instant) and Yahoo (global coverage,
+	// ~200ms) in parallel. Errors in either source don't break the other.
+	type srcResult struct {
+		results []StockSearchResult
+		err     error
+	}
+	csvCh := make(chan srcResult, 1)
+	yahooCh := make(chan srcResult, 1)
+
+	go func() {
+		svc, err := NewStockSearchService()
+		if err != nil {
+			csvCh <- srcResult{err: err}
+			return
+		}
+		csvCh <- srcResult{results: svc.Search(query, totalLimit)}
+	}()
+
+	go func() {
+		results, err := ws.collector.yahooClient.SearchSymbols(query, totalLimit)
+		yahooCh <- srcResult{results: results, err: err}
+	}()
+
+	csvOut := <-csvCh
+	yahooOut := <-yahooCh
+
+	// CSV first so Chinese-name matches (e.g. "苹果" → AAPL) appear at the top;
+	// Yahoo fills in the long tail. Dedupe by symbol (case-insensitive).
+	seen := make(map[string]bool, totalLimit)
+	merged := make([]StockSearchResult, 0, totalLimit)
+	push := func(rs []StockSearchResult) {
+		for _, r := range rs {
+			key := strings.ToUpper(r.Symbol)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			merged = append(merged, r)
+			if len(merged) >= totalLimit {
+				return
+			}
+		}
+	}
+	if csvOut.err == nil {
+		push(csvOut.results)
+	}
+	if len(merged) < totalLimit && yahooOut.err == nil {
+		push(yahooOut.results)
+	}
+
+	if csvOut.err != nil && yahooOut.err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("search failed: csv=%v yahoo=%v", csvOut.err, yahooOut.err),
+		})
 		return
 	}
 
-	fmt.Printf("Search service initialized successfully, loaded %d stocks\n", len(searchService.stocks))
-
-	// 执行搜索，最多返回15个结果
-	results := searchService.Search(query, 15)
-
-	fmt.Printf("Search for '%s' returned %d results\n", query, len(results))
-
 	c.JSON(http.StatusOK, gin.H{
 		"query":   query,
-		"results": results,
-		"count":   len(results),
+		"results": merged,
+		"count":   len(merged),
 	})
 }
