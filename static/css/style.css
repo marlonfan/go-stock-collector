@@ -67,269 +67,7 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-/* Stock Card Styles */
-.stock-card {
-  background: white;
-  border-radius: 20px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  overflow: hidden;
-  transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-}
-
-.stock-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
-}
-
-.stock-card.dark {
-  background: #1C1C1E;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-/* Stock Header */
-.stock-header {
-  padding: 24px;
-  background: linear-gradient(135deg, #f8fafc 0%, #ffffff 100%);
-  border-bottom: 1px solid #f1f5f9;
-}
-
-.stock-card.dark .stock-header {
-  background: linear-gradient(135deg, #2C2C2E 0%, #1C1C1E 100%);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.stock-info {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 16px;
-}
-
-.stock-title {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.stock-symbol {
-  font-size: 24px;
-  font-weight: 700;
-  color: #1d1d1f;
-  letter-spacing: -0.02em;
-}
-
-.stock-card.dark .stock-symbol {
-  color: #ffffff;
-}
-
-.stock-name {
-  font-size: 14px;
-  color: #6e6e73;
-  font-weight: 400;
-}
-
-.stock-card.dark .stock-name {
-  color: #98989d;
-}
-
-.stock-price-info {
-  text-align: right;
-}
-
-.current-price {
-  font-size: 32px;
-  font-weight: 700;
-  color: #1d1d1f;
-  line-height: 1;
-  margin-bottom: 4px;
-}
-
-.stock-card.dark .current-price {
-  color: #ffffff;
-}
-
-.price-change {
-  font-size: 16px;
-  font-weight: 600;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  border-radius: 6px;
-}
-
-.price-change.positive {
-  color: var(--apple-green);
-  background: rgba(52, 199, 89, 0.1);
-}
-
-.price-change.negative {
-  color: var(--apple-red);
-  background: rgba(255, 59, 48, 0.1);
-}
-
-/* Stock Actions */
-.stock-actions {
-  display: flex;
-  gap: 12px;
-}
-
-.action-btn {
-  flex: 1;
-  padding: 10px 16px;
-  border-radius: 12px;
-  font-size: 14px;
-  font-weight: 600;
-  border: none;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-}
-
-.toggle-btn {
-  background: #f2f2f7;
-  color: var(--apple-blue);
-}
-
-.toggle-btn:hover {
-  background: rgba(0, 122, 255, 0.1);
-  transform: scale(1.02);
-}
-
-.sync-btn {
-  background: var(--apple-blue);
-  color: white;
-}
-
-.sync-btn:hover {
-  background: #0056CC;
-  transform: scale(1.02);
-}
-
-.sync-btn:disabled {
-  background: #d1d1d6;
-  color: #8e8e93;
-  cursor: not-allowed;
-  transform: none;
-}
-
-.stock-card.dark .toggle-btn {
-  background: rgba(255, 255, 255, 0.1);
-  color: #0A84FF;
-}
-
-.stock-card.dark .toggle-btn:hover {
-  background: rgba(10, 132, 255, 0.2);
-}
-
-.remove-btn {
-  background: #f2f2f7;
-  color: var(--apple-red);
-}
-
-.remove-btn:hover {
-  background: rgba(255, 59, 48, 0.1);
-  transform: scale(1.02);
-}
-
-.stock-card.dark .remove-btn {
-  background: rgba(255, 255, 255, 0.1);
-  color: #ff453a;
-}
-
-.stock-card.dark .remove-btn:hover {
-  background: rgba(255, 69, 58, 0.2);
-}
-
-/* Data Table */
-.data-table-container {
-  overflow-x: auto;
-  background: white;
-  border-radius: 0 0 20px 20px;
-}
-
-.stock-card.dark .data-table-container {
-  background: #1C1C1E;
-}
-
-.data-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-
-.data-table th {
-  background: #f8fafc;
-  padding: 12px 16px;
-  text-align: left;
-  font-weight: 600;
-  color: #6e6e73;
-  border-bottom: 1px solid #e5e5ea;
-  position: sticky;
-  top: 0;
-  z-index: 10;
-}
-
-.stock-card.dark .data-table th {
-  background: #2C2C2E;
-  color: #98989d;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.data-table td {
-  padding: 12px 16px;
-  border-bottom: 1px solid #f2f2f7;
-  color: #1d1d1f;
-  white-space: nowrap;
-}
-
-.stock-card.dark .data-table td {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  color: #ffffff;
-}
-
-.data-table tr:hover td {
-  background: rgba(0, 122, 255, 0.02);
-}
-
-.stock-card.dark .data-table tr:hover td {
-  background: rgba(255, 255, 255, 0.03);
-}
-
-/* Price Column Styles */
-.price-col {
-  font-weight: 600;
-  font-family: "SF Mono", Monaco, monospace;
-}
-
-.change-col {
-  font-weight: 500;
-}
-
-.positive-change {
-  color: var(--apple-green);
-}
-
-.negative-change {
-  color: var(--apple-red);
-}
-
-/* Expand/Collapse Animation */
-.data-content {
-  max-height: 0;
-  overflow: hidden;
-  transition: max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.data-content.expanded {
-  max-height: 600px;
-}
-
-/* Loading Animation */
+/* Loading Animation (used by various spinners across the app) */
 .loading-spinner {
   display: inline-block;
   width: 16px;
@@ -366,40 +104,6 @@ body {
   to {
     transform: translateX(0);
     opacity: 1;
-  }
-}
-
-/* Responsive Design */
-@media (max-width: 768px) {
-  .stock-header {
-    padding: 20px;
-  }
-
-  .stock-symbol {
-    font-size: 20px;
-  }
-
-  .current-price {
-    font-size: 28px;
-  }
-
-  .data-table {
-    font-size: 12px;
-  }
-
-  .data-table th,
-  .data-table td {
-    padding: 8px 12px;
-  }
-}
-
-@media (max-width: 640px) {
-  .stock-actions {
-    flex-direction: column;
-  }
-
-  .data-table-container {
-    font-size: 11px;
   }
 }
 
@@ -1569,7 +1273,9 @@ tr.pinned-row:hover {
 }
 
 .stocks-history thead th {
-  padding: 10px 8px;
+  /* horizontal padding intentionally matches tbody td below so the sticky
+     stock column's text aligns with its cell content */
+  padding: 10px 12px;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -1579,7 +1285,7 @@ tr.pinned-row:hover {
   white-space: nowrap;
   font-family: var(--system-font);
   text-align: center;
-  min-width: 96px;
+  min-width: 84px;
 }
 
 .stocks-history thead th.col-stock {
@@ -1589,7 +1295,8 @@ tr.pinned-row:hover {
   z-index: 11;
   background: #f9fafb;
   border-right: 1px solid #e5e7eb;
-  min-width: 220px;
+  min-width: 150px;
+  width: 150px;
 }
 
 .dark .stocks-history thead th {
@@ -1604,7 +1311,7 @@ tr.pinned-row:hover {
 }
 
 .stocks-history tbody td {
-  padding: 8px 10px;
+  padding: 8px 12px;
   border-bottom: 1px solid #f3f4f6;
   vertical-align: top;
 }
@@ -1652,7 +1359,7 @@ tr.pinned-row:hover {
 .stocks-history .stock-meta-symbol {
   font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
   font-weight: 700;
-  font-size: 14px;
+  font-size: 13px;
   color: #111827;
   cursor: pointer;
 }
@@ -1662,28 +1369,31 @@ tr.pinned-row:hover {
 .dark .stocks-history .stock-meta-symbol { color: #f9fafb; }
 
 .stocks-history .stock-meta-name {
-  font-size: 11px;
+  font-size: 10px;
   color: #6b7280;
   margin-top: 1px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 160px;
+  max-width: 110px;
 }
 
 .dark .stocks-history .stock-meta-name { color: #9ca3af; }
 
-.stocks-history .stock-meta-price {
-  font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
-  font-weight: 600;
-  margin-top: 4px;
-  font-size: 12px;
-}
+/* Hide the redundant price line — every row's most-recent column already
+   shows OHLCV; freeing this space lets the stock-info column shrink to
+   ~150px so 6+ days are visible above the fold instead of 2. */
+.stocks-history .stock-meta-price { display: none; }
 
 .stocks-history .stock-meta-actions {
   display: flex;
-  gap: 2px;
+  gap: 1px;
   flex-shrink: 0;
+}
+
+.stocks-history .stock-meta-actions .stock-card-action-btn {
+  width: 24px;
+  height: 24px;
 }
 
 .stocks-history .ohlc-empty {
