@@ -4,6 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Stock Tracker</title>
+    <script>
+        // Apply dark mode synchronously before stylesheet to avoid FOUC.
+        (function () {
+            try {
+                var stored = localStorage.getItem('darkMode');
+                var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+                var dark = stored === 'dark' || ((stored === null || stored === 'system') && prefersDark);
+                if (dark) document.documentElement.classList.add('dark');
+            } catch (e) { /* localStorage may be disabled */ }
+        })();
+    </script>
     <link href="https://cdn.bootcdn.net/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/style.css">
@@ -11,21 +22,41 @@
 <body class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
     <!-- Navigation Header -->
     <header class="sticky top-0 z-50 backdrop-blur-xl bg-white/80 dark:bg-gray-900/80 border-b border-gray-200 dark:border-gray-700">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex items-center justify-between h-16">
-                <div class="flex items-center space-x-4">
-                    <div class="flex items-center space-x-2">
-                        <svg class="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
-                        </svg>
-                        <h1 class="text-xl font-semibold">Stock Tracker</h1>
-                    </div>
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
+            <div class="app-header-inner">
+                <div class="app-header-brand">
+                    <svg class="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                    </svg>
+                    <h1 class="text-xl font-semibold whitespace-nowrap">Stock Tracker</h1>
                 </div>
-                <button id="addStockBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl flex items-center space-x-2 transition-all duration-200 hover:scale-105">
+                <div class="global-search-wrap">
+                    <svg class="global-search-icon w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                    </svg>
+                    <input id="globalSearch" type="search" autocomplete="off" placeholder="搜索股票代码或公司名称 (按 / 快速聚焦)"
+                        class="global-search-input">
+                    <span class="global-search-kbd">/</span>
+                    <div id="globalSearchResults" class="global-search-results hidden"></div>
+                </div>
+                <button id="syncAllBtn" class="header-icon-btn" title="Sync All">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                    </svg>
+                </button>
+                <button id="darkToggleBtn" class="header-icon-btn" title="Toggle dark mode">
+                    <svg class="w-5 h-5 dark-toggle-icon-light" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>
+                    </svg>
+                    <svg class="w-5 h-5 dark-toggle-icon-dark" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path>
+                    </svg>
+                </button>
+                <button id="addStockBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl flex items-center space-x-2 transition-all duration-200 flex-shrink-0">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
                     </svg>
-                    <span>Add Stock</span>
+                    <span class="hidden sm:inline">Add Stock</span>
                 </button>
             </div>
         </div>
@@ -45,14 +76,14 @@
             </svg>
             <h3 class="mt-4 text-lg font-medium text-gray-900 dark:text-gray-100">No stocks tracked</h3>
             <p class="mt-2 text-gray-500 dark:text-gray-400">Get started by adding your first stock to track.</p>
-            <button onclick="showAddStockModal()" class="mt-4 bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-xl transition-all duration-200">
+            <button id="emptyAddStockBtn" class="mt-4 bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-xl transition-all duration-200">
                 Add Your First Stock
             </button>
         </div>
 
         <!-- Stock Grid View -->
-        <div id="stocksContainer" class="hidden">
-            <!-- Stock grid will be dynamically inserted here -->
+        <div id="stocksContainer" class="stocks-grid hidden">
+            <!-- Stock cards will be dynamically inserted here -->
         </div>
     </main>
 
@@ -89,7 +120,7 @@
                         <button type="submit" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-medium transition-all duration-200">
                             Add Stock
                         </button>
-                        <button type="button" onclick="hideAddStockModal()" class="flex-1 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 py-3 rounded-xl font-medium transition-all duration-200">
+                        <button type="button" id="cancelAddStockBtn" class="flex-1 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 py-3 rounded-xl font-medium transition-all duration-200">
                             Cancel
                         </button>
                     </div>
@@ -111,7 +142,7 @@
                             <h3 class="text-xl font-semibold text-gray-900 dark:text-gray-100" id="chartTitle">Stock Chart</h3>
                             <p class="text-sm text-gray-500 dark:text-gray-400" id="chartSubtitle">Historical performance</p>
                         </div>
-                        <button onclick="stockTracker.hideChartModal()" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">
+                        <button id="closeChartModalBtn" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">
                             <svg class="w-6 h-6 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
                             </svg>

@@ -8,13 +8,19 @@ class StockTracker {
         this.currentChartPeriod = 90;
         this.chartModalClickHandler = null;
         this.chartPeriodClickHandler = null;
+        this.suppressCardRerender = false;
+        this.activeSearchSource = null; // 'modal' | 'global'
+        this.searchDebounce = { modal: null, global: null };
         this.init();
     }
 
     init() {
         this.setupEventListeners();
+        this.setupGlobalSearch();
+        this.setupDarkModeToggle();
+        this.setupSyncAll();
+        this.setupKeyboardShortcuts();
         this.loadWatchedStocks();
-        this.setupDarkMode();
     }
 
     setupEventListeners() {
@@ -23,56 +29,167 @@ class StockTracker {
             this.showAddStockModal();
         });
 
+        // Empty state CTA (was using bare `showAddStockModal()` which broke)
+        const emptyAddBtn = document.getElementById('emptyAddStockBtn');
+        if (emptyAddBtn) {
+            emptyAddBtn.addEventListener('click', () => this.showAddStockModal());
+        }
+
         // Add stock form
         document.getElementById('addStockForm').addEventListener('submit', (e) => {
             e.preventDefault();
             this.addStock();
         });
 
-        // Stock search autocomplete
+        // Cancel button inside Add Stock modal
+        const cancelBtn = document.getElementById('cancelAddStockBtn');
+        if (cancelBtn) cancelBtn.addEventListener('click', () => this.hideAddStockModal());
+
+        // Close button inside chart modal
+        const closeChart = document.getElementById('closeChartModalBtn');
+        if (closeChart) closeChart.addEventListener('click', () => this.hideChartModal());
+
+        // Modal stock-symbol input → searchStocks(query, 'modal')
         const stockSymbolInput = document.getElementById('stockSymbol');
-        let searchTimeout;
-
         stockSymbolInput.addEventListener('input', (e) => {
-            clearTimeout(searchTimeout);
+            clearTimeout(this.searchDebounce.modal);
             const query = e.target.value.trim();
-
             if (query.length >= 1) {
-                searchTimeout = setTimeout(() => {
-                    this.searchStocks(query);
+                this.searchDebounce.modal = setTimeout(() => {
+                    this.searchStocks(query, 'modal');
                 }, 300);
             } else {
-                this.hideSearchResults();
+                this.hideSearchResults('modal');
             }
         });
 
-        // Hide search results when clicking outside
+        // Hide either search dropdown when clicking outside its input/results
         document.addEventListener('click', (e) => {
             if (!e.target.closest('#stockSymbol') && !e.target.closest('#stockSearchResults')) {
-                this.hideSearchResults();
+                this.hideSearchResults('modal');
+            }
+            if (!e.target.closest('#globalSearch') && !e.target.closest('#globalSearchResults')) {
+                this.hideSearchResults('global');
             }
         });
 
-        // Close modal on backdrop click
+        // Close add-stock modal on backdrop click
         document.getElementById('addStockModal').addEventListener('click', (e) => {
             if (e.target === e.currentTarget) {
                 this.hideAddStockModal();
             }
         });
+
+        // Card grid: event delegation (replaces inline onclick everywhere)
+        const stocksContainer = document.getElementById('stocksContainer');
+        if (stocksContainer) {
+            stocksContainer.addEventListener('click', (e) => this.handleCardClick(e));
+        }
     }
 
-    setupDarkMode() {
-        // Check for dark mode preference
-        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-            document.documentElement.classList.add('dark');
-        }
+    setupGlobalSearch() {
+        const input = document.getElementById('globalSearch');
+        const results = document.getElementById('globalSearchResults');
+        if (!input || !results) return;
 
-        // Listen for dark mode changes
-        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
-            if (e.matches) {
-                document.documentElement.classList.add('dark');
+        input.addEventListener('input', (e) => {
+            clearTimeout(this.searchDebounce.global);
+            const query = e.target.value.trim();
+            if (query.length >= 1) {
+                this.searchDebounce.global = setTimeout(() => {
+                    this.searchStocks(query, 'global');
+                }, 300);
             } else {
-                document.documentElement.classList.remove('dark');
+                this.hideSearchResults('global');
+            }
+        });
+
+        // Esc / Enter inside the field
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                this.hideSearchResults('global');
+                input.blur();
+            }
+        });
+    }
+
+    setupDarkModeToggle() {
+        const btn = document.getElementById('darkToggleBtn');
+        if (!btn) return;
+
+        btn.addEventListener('click', () => {
+            const isDark = document.documentElement.classList.toggle('dark');
+            try {
+                localStorage.setItem('darkMode', isDark ? 'dark' : 'light');
+            } catch (e) { /* ignore */ }
+            // Redraw any open chart so it picks up new isDarkMode reads
+            if (this.currentChartSymbol && this._chartLayout) {
+                this.drawCandlestickChart(this._chartLayout.data, this.currentChartSymbol);
+            }
+            // Re-render sparklines with new colors
+            this.renderAllSparklines();
+        });
+
+        // Follow system pref only when user hasn't picked manually
+        if (window.matchMedia) {
+            window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+                let stored = null;
+                try { stored = localStorage.getItem('darkMode'); } catch (err) {}
+                if (stored === 'dark' || stored === 'light') return;
+                document.documentElement.classList.toggle('dark', e.matches);
+                this.renderAllSparklines();
+            });
+        }
+    }
+
+    setupSyncAll() {
+        const btn = document.getElementById('syncAllBtn');
+        if (!btn) return;
+        btn.addEventListener('click', () => this.syncAllStocks());
+    }
+
+    setupKeyboardShortcuts() {
+        document.addEventListener('keydown', (e) => {
+            const tag = (e.target && e.target.tagName) || '';
+            const isTyping = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target && e.target.isContentEditable);
+
+            // Esc: close topmost open thing
+            if (e.key === 'Escape') {
+                const chartModal = document.getElementById('chartModal');
+                const addModal = document.getElementById('addStockModal');
+                if (chartModal && !chartModal.classList.contains('hidden')) {
+                    this.hideChartModal();
+                    e.preventDefault();
+                    return;
+                }
+                if (addModal && !addModal.classList.contains('hidden')) {
+                    this.hideAddStockModal();
+                    e.preventDefault();
+                    return;
+                }
+                const globalResults = document.getElementById('globalSearchResults');
+                if (globalResults && !globalResults.classList.contains('hidden')) {
+                    this.hideSearchResults('global');
+                    const gi = document.getElementById('globalSearch');
+                    if (gi) gi.blur();
+                    e.preventDefault();
+                    return;
+                }
+                return;
+            }
+
+            if (isTyping) return;
+
+            if (e.key === '/') {
+                const gi = document.getElementById('globalSearch');
+                if (gi) {
+                    e.preventDefault();
+                    gi.focus();
+                    gi.select();
+                }
+            } else if (e.key === 'a' || e.key === 'A') {
+                e.preventDefault();
+                this.showAddStockModal();
             }
         });
     }
@@ -125,11 +242,7 @@ class StockTracker {
             console.log('🎉 All stock data loaded, creating grid view...');
             console.log('📊 Current stocks in memory:', this.stocks.size);
 
-            // Create horizontal grid view
-            this.createHorizontalGridView();
-            console.log('✨ Grid view created successfully');
-
-            // Hide loading state and show the grid
+            this.renderStocks();
             this.hideLoadingState();
             console.log('👋 Loading state hidden, grid should be visible');
 
@@ -216,12 +329,7 @@ class StockTracker {
             this.stocks.delete(symbol);
             this.showSuccess(`Removed ${symbol} from watchlist`);
 
-            // Refresh view
-            if (this.stocks.size === 0) {
-                this.showEmptyState();
-            } else {
-                this.createHorizontalGridView();
-            }
+            this.renderStocks();
         } catch (error) {
             console.error('Failed to remove stock:', error);
             this.showError('Failed to remove stock');
@@ -229,22 +337,13 @@ class StockTracker {
     }
 
     async syncStockData(symbol) {
-        // Find sync button in table
-        const syncBtns = document.querySelectorAll(`[onclick*="${symbol}"]`);
-        let syncBtn = null;
-        syncBtns.forEach(btn => {
-            if (btn.onclick && btn.onclick.toString().includes('syncStockData')) {
-                syncBtn = btn;
-            }
-        });
+        // Find this card's syncing affordances via data attributes (no DOM
+        // string-matching). Fall back gracefully when called outside the grid.
+        const card = document.querySelector(`.stock-card[data-symbol="${symbol}"]`);
+        const syncBtn = card ? card.querySelector('.js-sync-btn') : null;
 
-        if (!syncBtn) return;
-
-        const originalContent = syncBtn.innerHTML;
-
-        // Show loading state
-        syncBtn.disabled = true;
-        syncBtn.innerHTML = '<div class="animate-spin rounded-full h-4 w-4 border border-blue-600 border-t-transparent"></div>';
+        if (card) card.classList.add('is-syncing');
+        if (syncBtn) syncBtn.disabled = true;
 
         try {
             const response = await fetch(`/api/stocks/${symbol}/sync`, {
@@ -266,16 +365,15 @@ class StockTracker {
                 }
             }
 
-            // Reload stock data and refresh view
+            // Reload stock data and refresh the affected card
             await this.loadStockData(symbol);
-            this.createHorizontalGridView();
+            this.renderStocks();
         } catch (error) {
             console.error('Failed to sync stock:', error);
             this.showError(error.message);
         } finally {
-            // Restore button
-            syncBtn.disabled = false;
-            syncBtn.innerHTML = originalContent;
+            if (card) card.classList.remove('is-syncing');
+            if (syncBtn) syncBtn.disabled = false;
         }
     }
 
@@ -285,149 +383,9 @@ class StockTracker {
             const data = await response.json();
 
             this.stocks.set(symbol, data);
-            this.createOrUpdateStockCard(data);
         } catch (error) {
             console.error(`Failed to load data for ${symbol}:`, error);
             this.showError(`Failed to load data for ${symbol}`);
-        }
-    }
-
-    createOrUpdateStockCard(data) {
-        // Store stock data, will be used in createHorizontalGridView
-        this.stocks.set(data.symbol, data);
-    }
-
-    createStockCard(data) {
-        const card = document.createElement('div');
-        card.className = 'stock-card';
-        card.dataset.stock = data.symbol;
-        card.innerHTML = this.getStockCardHTML(data);
-        return card;
-    }
-
-    updateStockCard(card, data) {
-        // Update price and change
-        const priceElement = card.querySelector('.current-price');
-        const changeElement = card.querySelector('.price-change');
-        const lastUpdateElement = card.querySelector('.last-update');
-
-        priceElement.textContent = this.formatPrice(data.currentPrice);
-
-        if (data.change !== undefined) {
-            const isPositive = data.change >= 0;
-            changeElement.className = `price-change ${isPositive ? 'positive' : 'negative'}`;
-            changeElement.innerHTML = this.formatPriceChange(data.change, data.changePercent);
-        }
-
-        if (data.lastUpdate) {
-            lastUpdateElement.textContent = `Last updated: ${this.formatDateTime(data.lastUpdate)}`;
-        }
-
-        // Update data table
-        this.updateDataTable(card, data.dailyData);
-    }
-
-    getStockCardHTML(data) {
-        const isPositive = data.change >= 0;
-        const changeClass = isPositive ? 'positive' : 'negative';
-        const changeHTML = this.formatPriceChange(data.change, data.changePercent);
-
-        return `
-            <div class="stock-header">
-                <div class="stock-info">
-                    <div class="stock-title">
-                        <span class="stock-symbol">${data.symbol}</span>
-                        ${data.name ? `<span class="stock-name">${data.name}</span>` : ''}
-                    </div>
-                </div>
-                <div class="stock-price-info">
-                    <div class="current-price">${this.formatPrice(data.currentPrice)}</div>
-                    <div class="price-change ${changeClass}">${changeHTML}</div>
-                    ${data.lastUpdate ? `<div class="last-update text-xs text-gray-500 mt-1">Last updated: ${this.formatDateTime(data.lastUpdate)}</div>` : ''}
-                </div>
-                <div class="stock-actions mt-4">
-                    <button class="action-btn toggle-btn" onclick="stockTracker.toggleDataTable('${data.symbol}')">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
-                        </svg>
-                        <span id="toggle-text-${data.symbol}">Show Data</span>
-                    </button>
-                    <button class="action-btn sync-btn" onclick="stockTracker.syncStockData('${data.symbol}')">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                        </svg>
-                        Sync Data
-                    </button>
-                    <button class="action-btn remove-btn" onclick="stockTracker.removeStock('${data.symbol}')">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-                        </svg>
-                        Remove
-                    </button>
-                </div>
-            </div>
-            <div class="data-content" id="data-${data.symbol}">
-                <div class="data-table-container">
-                    <table class="data-table">
-                        <thead>
-                            <tr>
-                                <th>Date</th>
-                                <th>Open</th>
-                                <th>High</th>
-                                <th>Low</th>
-                                <th>Close</th>
-                                <th>Change</th>
-                                <th>Volume</th>
-                            </tr>
-                        </thead>
-                        <tbody id="table-body-${data.symbol}">
-                            ${this.generateTableRows(data.dailyData)}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        `;
-    }
-
-    generateTableRows(dailyData) {
-        if (!dailyData || dailyData.length === 0) {
-            return '<tr><td colspan="7" class="text-center py-8 text-gray-500">No data available</td></tr>';
-        }
-
-        return dailyData.map((day, index) => {
-            const change = day.close - day.open;
-            const changePercent = day.open > 0 ? (change / day.open) * 100 : 0;
-            const changeClass = change >= 0 ? 'positive-change' : 'negative-change';
-
-            return `
-                <tr>
-                    <td>${this.formatDate(day.date)}</td>
-                    <td class="price-col">${this.formatPrice(day.open)}</td>
-                    <td class="price-col">${this.formatPrice(day.high)}</td>
-                    <td class="price-col">${this.formatPrice(day.low)}</td>
-                    <td class="price-col">${this.formatPrice(day.close)}</td>
-                    <td class="change-col ${changeClass}">
-                        ${this.formatPriceChange(change, changePercent)}
-                    </td>
-                    <td>${this.formatVolume(day.volume)}</td>
-                </tr>
-            `;
-        }).join('');
-    }
-
-    updateDataTable(card, dailyData) {
-        const tbody = card.querySelector(`#table-body-${card.dataset.stock}`);
-        if (tbody) {
-            tbody.innerHTML = this.generateTableRows(dailyData);
-        }
-    }
-
-    removeStockCard(symbol) {
-        const card = document.querySelector(`[data-stock="${symbol}"]`);
-        if (card) {
-            card.style.opacity = '0';
-            card.style.transform = 'translateX(-20px)';
-            setTimeout(() => card.remove(), 300);
         }
     }
 
@@ -468,19 +426,6 @@ class StockTracker {
 
     showError(message) {
         this.showMessage(message, 'error');
-    }
-
-    toggleDataTable(symbol) {
-        const dataContent = document.getElementById(`data-${symbol}`);
-        const toggleText = document.getElementById(`toggle-text-${symbol}`);
-
-        if (dataContent.classList.contains('expanded')) {
-            dataContent.classList.remove('expanded');
-            toggleText.textContent = 'Show Data';
-        } else {
-            dataContent.classList.add('expanded');
-            toggleText.textContent = 'Hide Data';
-        }
     }
 
     showMessage(message, type = 'success') {
@@ -541,250 +486,337 @@ class StockTracker {
         }).format(new Date(date));
     }
 
-    createHorizontalGridView() {
-        console.log('🎯 Creating horizontal grid view...');
+    renderStocks() {
+        if (this.suppressCardRerender) return;
+
         const container = document.getElementById('stocksContainer');
+        if (!container) return;
         container.innerHTML = '';
 
-        console.log('📊 Stocks in memory:', this.stocks.size);
         if (this.stocks.size === 0) {
-            console.log('⚠️ No stocks in memory, returning');
+            this.showEmptyState();
             return;
         }
+        this.hideEmptyState();
 
-        // Get all unique dates from all stocks, sorted by date
-        const allDates = new Set();
-        const stockDataMap = new Map();
-
-        console.log('🔍 Processing stock data...');
-        for (const [symbol, data] of this.stocks) {
-            console.log(`📈 Processing ${symbol}:`, data);
-            if (data.dailyData && data.dailyData.length > 0) {
-                stockDataMap.set(symbol, data);
-                console.log(`✅ ${symbol} has ${data.dailyData.length} daily data points`);
-                data.dailyData.forEach(day => {
-                    allDates.add(day.date.split('T')[0]);
-                });
-            } else {
-                console.log(`⚠️ ${symbol} has no daily data`);
-            }
-        }
-
-        const sortedDates = Array.from(allDates).sort().reverse(); // Most recent first
-        const stockSymbols = Array.from(stockDataMap.keys());
-
-        // Sort stocks: pinned stocks first, then alphabetical
-        const pinnedStocks = this.getPinnedStocks();
-        stockSymbols.sort((a, b) => {
-            const aPinned = pinnedStocks.includes(a);
-            const bPinned = pinnedStocks.includes(b);
-
-            if (aPinned && !bPinned) return -1;
-            if (!aPinned && bPinned) return 1;
-            return a.localeCompare(b); // Alphabetical order within each group
+        // Sort: pinned first, then alphabetical
+        const pinned = this.getPinnedStocks();
+        const symbols = Array.from(this.stocks.keys()).sort((a, b) => {
+            const ap = pinned.includes(a), bp = pinned.includes(b);
+            if (ap && !bp) return -1;
+            if (!ap && bp) return 1;
+            return a.localeCompare(b);
         });
 
-        if (sortedDates.length === 0) {
-            container.innerHTML = '<div class="text-center text-gray-500 py-8">No daily data available</div>';
-            return;
-        }
+        const cardsHTML = symbols.map(symbol => this.cardHTML(this.stocks.get(symbol))).join('');
+        container.innerHTML = cardsHTML;
 
-        // Create horizontal grid table
-        const gridHTML = `
-            <div class="overflow-x-auto bg-white dark:bg-gray-800 rounded-2xl shadow-lg">
-                <table class="w-full border-collapse">
-                    <thead>
-                        <tr class="border-b border-gray-200 dark:border-gray-700">
-                            <th class="sticky left-0 bg-white dark:bg-gray-800 p-4 text-left font-semibold text-gray-900 dark:text-gray-100 border-r border-gray-200 dark:border-gray-700">
-                                Stock
-                            </th>
-                            ${sortedDates.map(date => `
-                                <th class="p-3 text-center min-w-[140px] font-medium text-gray-700 dark:text-gray-300 text-xs whitespace-nowrap">
-                                    <div>${this.formatDateHeader(date)}</div>
-                                </th>
-                            `).join('')}
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${stockSymbols.map(symbol => {
-                            const stock = stockDataMap.get(symbol);
-                            const dailyDataMap = new Map();
-                            stock.dailyData.forEach(day => {
-                                dailyDataMap.set(day.date.split('T')[0], day);
-                            });
+        // Defer sparkline render past the layout the browser is about to do.
+        requestAnimationFrame(() => this.renderAllSparklines());
+    }
 
-                            const isPinned = this.isPinned(symbol);
-                            const pinnedClass = isPinned ? 'bg-yellow-50 dark:bg-yellow-900/10' : '';
+    cardHTML(stock) {
+        if (!stock) return '';
+        const symbol = stock.symbol;
+        const isPinned = this.isPinned(symbol);
+        const change = stock.change || 0;
+        const changePct = stock.changePercent || 0;
+        const isUp = change >= 0;
+        const trendClass = isUp ? 'trend-up' : 'trend-down';
+        const sign = isUp ? '+' : '';
+        const lastBar = stock.dailyData && stock.dailyData[0]; // dailyData is DESC
+        const volume = lastBar ? this.formatVolume(lastBar.volume) : '—';
+        const lastUpdate = stock.lastUpdate ? this.formatRelativeTime(stock.lastUpdate) : '—';
 
-                            return `
-                                <tr class="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors ${pinnedClass}">
-                                    <td class="sticky left-0 bg-white dark:bg-gray-800 p-4 border-r border-gray-200 dark:border-gray-700">
-                                        <div class="flex items-center justify-between">
-                                            <div>
-                                                <div class="font-semibold text-gray-900 dark:text-gray-100 cursor-pointer hover:text-blue-600 transition-colors"
-                                                     onclick="stockTracker.showChartModal('${symbol}')"
-                                                     title="Click to view chart">
-                                                    ${symbol}
-                                                </div>
-                                                <div class="text-xs text-gray-500 dark:text-gray-400">${stock.name || ''}</div>
-                                                <div class="text-sm font-medium mt-1 ${stock.change >= 0 ? 'text-red-600' : 'text-green-600'}">
-                                                    ${this.formatPrice(stock.currentPrice)}
-                                                    <span class="text-xs ml-1">
-                                                        ${stock.change >= 0 ? '+' : ''}${stock.changePercent?.toFixed(2)}%
-                                                    </span>
-                                                </div>
-                                            </div>
-                                            <div class="flex space-x-1">
-                                                <button onclick="stockTracker.togglePin('${symbol}')"
-                                                    class="p-1 ${isPinned ? 'text-yellow-600 hover:bg-yellow-50 dark:hover:bg-yellow-900/20' : 'text-gray-400 hover:text-yellow-600 hover:bg-yellow-50 dark:hover:bg-yellow-900/20'} rounded transition-colors"
-                                                    title="${isPinned ? 'Unpin Stock' : 'Pin Stock'}">
-                                                    <svg class="w-4 h-4" fill="${isPinned ? 'currentColor' : 'none'}" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2l3.09 6.32L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.05L12 2z"></path>
-                                                    </svg>
-                                                </button>
-                                                <button onclick="stockTracker.syncStockData('${symbol}')"
-                                                    class="p-1 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors"
-                                                    title="Sync Data">
-                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                                                    </svg>
-                                                </button>
-                                                <button onclick="stockTracker.removeStock('${symbol}')"
-                                                    class="p-1 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
-                                                    title="Remove Stock">
-                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-                                                    </svg>
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </td>
-                                    ${sortedDates.map((date, dateIndex) => {
-                                        const dayData = dailyDataMap.get(date);
-                                        if (dayData) {
-                                            // Get previous day's close for comparison
-                                            let prevClose = null;
-                                            if (dateIndex < sortedDates.length - 1) {
-                                                const prevDate = sortedDates[dateIndex + 1];
-                                                const prevDayData = dailyDataMap.get(prevDate);
-                                                if (prevDayData) {
-                                                    prevClose = prevDayData.close;
-                                                }
-                                            }
+        const pinnedClass = isPinned ? ' pinned' : '';
+        const pinBtnClass = isPinned ? 'is-pinned' : '';
+        const pinTitle = isPinned ? 'Unpin' : 'Pin';
 
-                                            // Determine open color: red if higher than prev close, green if lower
-                                            let openColorClass = '';
-                                            if (prevClose !== null) {
-                                                openColorClass = dayData.open >= prevClose ? 'text-red-600' : 'text-green-600';
-                                            }
-
-                                            return `
-                                                <td class="p-2 text-center">
-                                                    <div class="ohlc-cell">
-                                                        <div class="ohlc-open ${openColorClass}">O ${this.formatCompactPrice(dayData.open)}</div>
-                                                        <div class="ohlc-high">H ${this.formatCompactPrice(dayData.high)}</div>
-                                                        <div class="ohlc-low">L ${this.formatCompactPrice(dayData.low)}</div>
-                                                        <div class="ohlc-close ${dayData.close >= dayData.open ? 'text-red-600' : 'text-green-600'}">
-                                                            C ${this.formatCompactPrice(dayData.close)}
-                                                        </div>
-                                                        <div class="ohlc-volume text-xs text-gray-500">
-                                                            ${this.formatCompactVolume(dayData.volume)}
-                                                        </div>
-                                                    </div>
-                                                </td>
-                                            `;
-                                        } else {
-                                            return `<td class="p-2 text-center text-gray-400">—</td>`;
-                                        }
-                                    }).join('')}
-                                </tr>
-                            `;
-                        }).join('')}
-                    </tbody>
-                </table>
+        return `
+            <div class="stock-card${pinnedClass}" data-symbol="${symbol}" data-action="open-chart">
+                <div class="stock-card-syncing-overlay"></div>
+                <div class="stock-card-head">
+                    <div style="min-width: 0;">
+                        <div class="stock-card-symbol">${symbol}</div>
+                        <div class="stock-card-name">${this._escape(stock.name || '')}</div>
+                    </div>
+                    <div class="stock-card-actions">
+                        <button type="button" class="stock-card-action-btn ${pinBtnClass}"
+                            data-action="pin" data-symbol="${symbol}" title="${pinTitle}">
+                            <svg class="w-4 h-4" fill="${isPinned ? 'currentColor' : 'none'}" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2l3.09 6.32L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.05L12 2z"></path>
+                            </svg>
+                        </button>
+                        <button type="button" class="stock-card-action-btn js-sync-btn"
+                            data-action="sync" data-symbol="${symbol}" title="Sync data">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                            </svg>
+                        </button>
+                        <button type="button" class="stock-card-action-btn is-danger"
+                            data-action="remove" data-symbol="${symbol}" title="Remove">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="stock-card-price">${this.formatPrice(stock.currentPrice || 0)}</div>
+                <div class="stock-card-change ${trendClass}">${sign}${this.formatPrice(change)} &nbsp; ${sign}${changePct.toFixed(2)}%</div>
+                <div class="stock-card-sparkline-wrap">
+                    <canvas class="stock-card-sparkline" data-symbol="${symbol}"></canvas>
+                </div>
+                <div class="stock-card-foot">
+                    <span>Vol ${volume}</span>
+                    <span>${lastUpdate}</span>
+                </div>
             </div>
         `;
-
-        container.innerHTML = gridHTML;
     }
 
-    formatDateHeader(dateStr) {
-        const date = new Date(dateStr);
-        return date.toLocaleDateString('en-US', {
-            month: 'short',
-            day: 'numeric'
+    handleCardClick(e) {
+        const actionEl = e.target.closest('[data-action]');
+        if (!actionEl) return;
+        const action = actionEl.dataset.action;
+        const symbol = actionEl.dataset.symbol;
+
+        // Inner action buttons must not trigger the card's own open-chart action
+        if (action !== 'open-chart') {
+            e.stopPropagation();
+        }
+
+        switch (action) {
+            case 'open-chart':
+                if (symbol) this.showChartModal(symbol);
+                break;
+            case 'pin':
+                if (symbol) this.togglePin(symbol);
+                break;
+            case 'sync':
+                if (symbol) this.syncStockData(symbol);
+                break;
+            case 'remove':
+                if (symbol) this.removeStock(symbol);
+                break;
+        }
+    }
+
+    formatRelativeTime(ts) {
+        const t = new Date(ts).getTime();
+        if (isNaN(t)) return '—';
+        const diff = (Date.now() - t) / 1000;
+        if (diff < 60) return 'just now';
+        if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+        if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+        return `${Math.floor(diff / 86400)}d ago`;
+    }
+
+    renderAllSparklines() {
+        document.querySelectorAll('.stock-card-sparkline').forEach(canvas => {
+            const symbol = canvas.dataset.symbol;
+            const stock = this.stocks.get(symbol);
+            this.renderSparkline(canvas, stock);
         });
     }
 
-    formatCompactPrice(price) {
-        if (price >= 1000) {
-            return `${(price / 1000).toFixed(1)}k`;
+    renderSparkline(canvas, stock) {
+        if (!canvas) return;
+        const rect = canvas.getBoundingClientRect();
+        const width = Math.max(1, rect.width);
+        const height = 56;
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = width * dpr;
+        canvas.height = height * dpr;
+        const ctx = canvas.getContext('2d');
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.scale(dpr, dpr);
+        ctx.clearRect(0, 0, width, height);
+
+        const series = stock && Array.isArray(stock.dailyData) ? stock.dailyData : [];
+        if (series.length < 2) {
+            // Flat midline placeholder
+            const styles = getComputedStyle(document.documentElement);
+            ctx.strokeStyle = styles.getPropertyValue('--color-up').trim() || '#10b981';
+            ctx.lineWidth = 1.5;
+            ctx.globalAlpha = 0.3;
+            ctx.beginPath();
+            ctx.moveTo(0, height / 2);
+            ctx.lineTo(width, height / 2);
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+            return;
         }
-        return price.toFixed(price < 10 ? 3 : 2);
+
+        // dailyData is DESC; reverse to chronological for left-to-right plotting.
+        const closes = series.slice().reverse().slice(-30).map(d => d.close);
+        let lo = Infinity, hi = -Infinity;
+        for (const c of closes) { if (c < lo) lo = c; if (c > hi) hi = c; }
+        const range = hi - lo || 1;
+        const padY = 4;
+        const stepX = closes.length > 1 ? width / (closes.length - 1) : 0;
+
+        const isUp = closes[closes.length - 1] >= closes[0];
+        const styles = getComputedStyle(document.documentElement);
+        const color = (isUp
+            ? styles.getPropertyValue('--color-up').trim()
+            : styles.getPropertyValue('--color-down').trim()) || (isUp ? '#10b981' : '#ef4444');
+
+        // Filled area
+        ctx.beginPath();
+        ctx.moveTo(0, height - padY);
+        closes.forEach((c, i) => {
+            const x = i * stepX;
+            const y = padY + (1 - (c - lo) / range) * (height - 2 * padY);
+            ctx.lineTo(x, y);
+        });
+        ctx.lineTo((closes.length - 1) * stepX, height - padY);
+        ctx.closePath();
+        ctx.fillStyle = color;
+        ctx.globalAlpha = 0.12;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+
+        // Stroke line
+        ctx.beginPath();
+        closes.forEach((c, i) => {
+            const x = i * stepX;
+            const y = padY + (1 - (c - lo) / range) * (height - 2 * padY);
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        ctx.lineJoin = 'round';
+        ctx.stroke();
     }
 
-    formatCompactVolume(volume) {
-        if (volume >= 1000000) {
-            return `${(volume / 1000000).toFixed(1)}M`;
-        } else if (volume >= 1000) {
-            return `${(volume / 1000).toFixed(1)}K`;
+    async syncAllStocks() {
+        const symbols = Array.from(this.stocks.keys());
+        if (symbols.length === 0) {
+            this.showError('No stocks to sync');
+            return;
         }
-        return volume.toString();
+
+        const btn = document.getElementById('syncAllBtn');
+        if (btn) {
+            btn.disabled = true;
+            btn.classList.add('is-busy');
+        }
+        document.querySelectorAll('.js-sync-btn').forEach(b => b.disabled = true);
+
+        this.showSuccess(`Syncing ${symbols.length} stocks...`);
+
+        // Suppress per-call rerenders, run chunks of 3, collect outcomes.
+        this.suppressCardRerender = true;
+        const results = [];
+        for (let i = 0; i < symbols.length; i += 3) {
+            const chunk = symbols.slice(i, i + 3);
+            const settled = await Promise.allSettled(chunk.map(s =>
+                fetch(`/api/stocks/${s}/sync`, { method: 'POST' }).then(r => {
+                    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                    return r.json();
+                })
+            ));
+            settled.forEach((res, idx) => {
+                results.push({ symbol: chunk[idx], status: res.status, reason: res.reason });
+            });
+        }
+        this.suppressCardRerender = false;
+
+        // Clear chart cache wholesale — every stock may have changed
+        this.chartCache.clear();
+
+        // Single refresh
+        await this.loadWatchedStocks();
+
+        if (btn) {
+            btn.disabled = false;
+            btn.classList.remove('is-busy');
+        }
+
+        const ok = results.filter(r => r.status === 'fulfilled').length;
+        const fail = results.length - ok;
+        if (fail > 0) {
+            this.showError(`Synced ${ok}, failed ${fail}`);
+        } else {
+            this.showSuccess(`Synced ${ok} stocks`);
+        }
     }
 
-    // Stock search methods
-    async searchStocks(query) {
+    // Stock search methods. `source` is 'modal' or 'global'.
+    async searchStocks(query, source = 'modal') {
         try {
-            console.log('🔍 Searching stocks for:', query);
             const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
             const data = await response.json();
 
             if (data.results && data.results.length > 0) {
-                this.showSearchResults(data.results);
+                this.showSearchResults(data.results, source);
             } else {
-                this.hideSearchResults();
+                this.hideSearchResults(source);
             }
         } catch (error) {
-            console.error('❌ Failed to search stocks:', error);
-            this.hideSearchResults();
+            console.error('Failed to search stocks:', error);
+            this.hideSearchResults(source);
         }
     }
 
-    showSearchResults(results) {
-        const resultsContainer = document.getElementById('stockSearchResults');
+    _searchTargetIds(source) {
+        return source === 'global'
+            ? { results: 'globalSearchResults', dataSource: 'global' }
+            : { results: 'stockSearchResults', dataSource: 'modal' };
+    }
+
+    showSearchResults(results, source = 'modal') {
+        const { results: resultsId, dataSource } = this._searchTargetIds(source);
+        const resultsContainer = document.getElementById(resultsId);
+        if (!resultsContainer) return;
 
         if (results.length === 0) {
-            this.hideSearchResults();
+            this.hideSearchResults(source);
             return;
         }
+
+        const ctaText = source === 'global' ? '一键加入' : '点击选择';
 
         const resultsHTML = results.map(stock => `
             <div class="stock-search-result px-4 py-3 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer border-b border-gray-100 dark:border-gray-600 last:border-b-0"
                  data-symbol="${stock.symbol}"
-                 data-name="${stock.name}"
-                 onclick="stockTracker.selectStock('${stock.symbol}', '${stock.name}')">
-                <div class="flex items-center justify-between">
-                    <div class="flex-1">
+                 data-name="${this._escape(stock.name)}"
+                 data-source="${dataSource}">
+                <div class="flex items-center justify-between gap-3">
+                    <div class="flex-1 min-w-0">
                         <div class="font-semibold text-gray-900 dark:text-gray-100">
                             ${stock.symbol}
                         </div>
-                        <div class="text-sm text-gray-600 dark:text-gray-400">
-                            ${stock.fullName}
+                        <div class="text-sm text-gray-600 dark:text-gray-400 truncate">
+                            ${this._escape(stock.fullName || stock.name || '')}
                         </div>
                     </div>
-                    <div class="text-xs text-blue-600 dark:text-blue-400">
-                        点击选择
-                    </div>
+                    <div class="text-xs text-blue-600 dark:text-blue-400 whitespace-nowrap">${ctaText}</div>
                 </div>
             </div>
         `).join('');
 
         resultsContainer.innerHTML = resultsHTML;
         resultsContainer.classList.remove('hidden');
+
+        // Bind click handlers (no inline onclick)
+        resultsContainer.querySelectorAll('.stock-search-result').forEach(el => {
+            el.addEventListener('click', () => {
+                const symbol = el.dataset.symbol;
+                const name = el.dataset.name;
+                if (el.dataset.source === 'global') {
+                    this.addStockDirect(symbol, name);
+                } else {
+                    this.selectStock(symbol, name);
+                }
+            });
+        });
     }
 
-    hideSearchResults() {
-        const resultsContainer = document.getElementById('stockSearchResults');
+    hideSearchResults(source = 'modal') {
+        const { results: resultsId } = this._searchTargetIds(source);
+        const resultsContainer = document.getElementById(resultsId);
+        if (!resultsContainer) return;
         resultsContainer.classList.add('hidden');
         resultsContainer.innerHTML = '';
     }
@@ -792,12 +824,45 @@ class StockTracker {
     selectStock(symbol, name) {
         const symbolInput = document.getElementById('stockSymbol');
         const nameInput = document.getElementById('stockName');
-
         symbolInput.value = symbol;
-        nameInput.value = name;
-
-        this.hideSearchResults();
+        nameInput.value = name || '';
+        this.hideSearchResults('modal');
         symbolInput.focus();
+    }
+
+    // Header search "一键加入": add to watchlist directly + auto-sync.
+    async addStockDirect(symbol, name) {
+        const sym = (symbol || '').toUpperCase().trim();
+        if (!sym) return;
+        try {
+            const response = await fetch('/api/stocks', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ symbol: sym, name: name || '' }),
+            });
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || 'Failed to add stock');
+            }
+            this.showSuccess(`Added ${sym}, fetching data...`);
+
+            // Reset header search
+            const gi = document.getElementById('globalSearch');
+            if (gi) gi.value = '';
+            this.hideSearchResults('global');
+
+            // Best-effort sync, then refresh
+            try {
+                await fetch(`/api/stocks/${sym}/sync`, { method: 'POST' });
+            } catch (e) { /* non-fatal */ }
+            await this.loadWatchedStocks();
+        } catch (error) {
+            this.showError(error.message);
+        }
+    }
+
+    _escape(s) {
+        return String(s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     }
 
     // K-line Chart Modal Methods
@@ -1408,7 +1473,7 @@ class StockTracker {
         }
 
         this.savePinnedStocks(pinnedStocks);
-        this.createHorizontalGridView(); // Refresh the grid
+        this.renderStocks();
     }
 }
 
