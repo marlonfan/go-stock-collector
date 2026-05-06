@@ -1164,3 +1164,203 @@ tr.pinned-row:hover {
   }
   .global-search-kbd { display: none; }
 }
+
+/* View-mode toggle (Cards / List) */
+.view-toggle {
+  display: inline-flex;
+  background: #f3f4f6;
+  border-radius: 10px;
+  padding: 2px;
+  flex-shrink: 0;
+}
+
+.view-toggle-btn {
+  width: 34px;
+  height: 34px;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  color: #6b7280;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.view-toggle-btn:hover { color: #111827; }
+
+.view-toggle-btn.active {
+  background: white;
+  color: #111827;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.dark .view-toggle { background: #374151; }
+.dark .view-toggle-btn { color: #9ca3af; }
+.dark .view-toggle-btn:hover { color: #f9fafb; }
+.dark .view-toggle-btn.active {
+  background: #1f2937;
+  color: #f9fafb;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+/* List view: compact table for at-a-glance OHLC scan across stocks */
+.stocks-list-wrap {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  overflow-x: auto;
+}
+
+.dark .stocks-list-wrap {
+  background: #1f2937;
+  border-color: #374151;
+}
+
+.stocks-list {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+}
+
+.stocks-list thead th {
+  text-align: right;
+  padding: 12px 14px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #6b7280;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+  white-space: nowrap;
+  font-family: var(--system-font);
+}
+
+.dark .stocks-list thead th {
+  background: #111827;
+  color: #9ca3af;
+  border-color: #374151;
+}
+
+.stocks-list thead th:first-child,
+.stocks-list thead th.col-symbol { text-align: left; }
+.stocks-list thead th.col-actions { text-align: center; width: 1%; }
+.stocks-list thead th.col-spark { text-align: center; }
+
+.stocks-list tbody tr {
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.stocks-list tbody tr:hover { background: #f9fafb; }
+.stocks-list tbody tr.pinned {
+  background: #fffbeb;
+  box-shadow: inset 3px 0 0 #f59e0b;
+}
+.stocks-list tbody tr.pinned:hover { background: #fef3c7; }
+
+.dark .stocks-list tbody tr:hover { background: #111827; }
+.dark .stocks-list tbody tr.pinned { background: rgba(245, 158, 11, 0.08); }
+.dark .stocks-list tbody tr.pinned:hover { background: rgba(245, 158, 11, 0.14); }
+
+.stocks-list tbody td {
+  padding: 12px 14px;
+  border-bottom: 1px solid #f3f4f6;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.dark .stocks-list tbody td { border-color: #2a3441; }
+
+.stocks-list tbody tr:last-child td { border-bottom: none; }
+
+.stocks-list .col-symbol {
+  text-align: left;
+  min-width: 140px;
+  font-family: var(--system-font);
+}
+
+.stocks-list .row-symbol {
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+  font-weight: 700;
+  color: #111827;
+  font-size: 14px;
+}
+
+.dark .stocks-list .row-symbol { color: #f9fafb; }
+
+.stocks-list .row-name {
+  font-family: var(--system-font);
+  font-size: 11px;
+  color: #6b7280;
+  margin-top: 1px;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dark .stocks-list .row-name { color: #9ca3af; }
+
+.stocks-list .col-spark {
+  width: 132px;
+  padding: 8px 12px;
+}
+
+.stocks-list .col-spark canvas {
+  display: block;
+  width: 110px;
+  height: 28px;
+  margin-left: auto;
+}
+
+.stocks-list .col-actions {
+  width: 1%;
+  padding: 8px;
+  white-space: nowrap;
+}
+
+.stocks-list .col-actions-inner {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.stocks-list .col-num-strong {
+  font-weight: 600;
+  color: #111827;
+}
+
+.dark .stocks-list .col-num-strong { color: #f9fafb; }
+
+.stocks-list .pin-cell {
+  width: 1%;
+  padding-left: 14px;
+  padding-right: 0;
+}
+
+.stocks-list .pin-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  color: #d1d5db;
+  display: inline-flex;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.stocks-list .pin-btn.is-pinned { color: #f59e0b; }
+.stocks-list .pin-btn:hover { background: #f3f4f6; color: #f59e0b; }
+.dark .stocks-list .pin-btn { color: #4b5563; }
+.dark .stocks-list .pin-btn.is-pinned { color: #fbbf24; }
+.dark .stocks-list .pin-btn:hover { background: #374151; color: #fbbf24; }
+
+/* Hide less-critical columns at narrower widths so OHLC keeps priority */
+@media (max-width: 1100px) {
+  .stocks-list .col-spark { display: none; }
+}
+@media (max-width: 960px) {
+  .stocks-list .col-vol { display: none; }
+}

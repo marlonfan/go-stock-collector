@@ -11,7 +11,16 @@ class StockTracker {
         this.suppressCardRerender = false;
         this.activeSearchSource = null; // 'modal' | 'global'
         this.searchDebounce = { modal: null, global: null };
+        this.viewMode = this._initialViewMode(); // 'list' | 'cards'
         this.init();
+    }
+
+    _initialViewMode() {
+        let stored = null;
+        try { stored = localStorage.getItem('viewMode'); } catch (e) {}
+        if (stored === 'list' || stored === 'cards') return stored;
+        // PC default = list (better for at-a-glance OHLC scan), mobile = cards
+        return (window.innerWidth >= 768) ? 'list' : 'cards';
     }
 
     init() {
@@ -19,8 +28,30 @@ class StockTracker {
         this.setupGlobalSearch();
         this.setupDarkModeToggle();
         this.setupSyncAll();
+        this.setupViewModeToggle();
         this.setupKeyboardShortcuts();
         this.loadWatchedStocks();
+    }
+
+    setupViewModeToggle() {
+        const toggle = document.getElementById('viewToggle');
+        if (!toggle) return;
+        // Initial active state
+        toggle.querySelectorAll('.view-toggle-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.view === this.viewMode);
+        });
+        toggle.addEventListener('click', (e) => {
+            const btn = e.target.closest('.view-toggle-btn');
+            if (!btn) return;
+            const mode = btn.dataset.view;
+            if (!mode || mode === this.viewMode) return;
+            this.viewMode = mode;
+            try { localStorage.setItem('viewMode', mode); } catch (err) {}
+            toggle.querySelectorAll('.view-toggle-btn').forEach(b => {
+                b.classList.toggle('active', b.dataset.view === mode);
+            });
+            this.renderStocks();
+        });
     }
 
     setupEventListeners() {
@@ -337,10 +368,11 @@ class StockTracker {
     }
 
     async syncStockData(symbol) {
-        // Find this card's syncing affordances via data attributes (no DOM
-        // string-matching). Fall back gracefully when called outside the grid.
-        const card = document.querySelector(`.stock-card[data-symbol="${symbol}"]`);
-        const syncBtn = card ? card.querySelector('.js-sync-btn') : null;
+        // Find this stock's syncing affordances via data attributes (works for
+        // both card and list views since both use [data-symbol]).
+        const root = document.querySelector(`#stocksContainer [data-symbol="${symbol}"]`);
+        const card = root && root.classList.contains('stock-card') ? root : null;
+        const syncBtn = document.querySelector(`#stocksContainer .js-sync-btn[data-symbol="${symbol}"]`);
 
         if (card) card.classList.add('is-syncing');
         if (syncBtn) syncBtn.disabled = true;
@@ -508,11 +540,103 @@ class StockTracker {
             return a.localeCompare(b);
         });
 
-        const cardsHTML = symbols.map(symbol => this.cardHTML(this.stocks.get(symbol))).join('');
-        container.innerHTML = cardsHTML;
+        // Toggle layout class without dropping `hidden` (managed by show/hide methods)
+        container.classList.remove('stocks-grid', 'stocks-list-wrap');
+        if (this.viewMode === 'list') {
+            container.classList.add('stocks-list-wrap');
+            container.innerHTML = this.listHTML(symbols);
+        } else {
+            container.classList.add('stocks-grid');
+            container.innerHTML = symbols.map(symbol => this.cardHTML(this.stocks.get(symbol))).join('');
+        }
 
         // Defer sparkline render past the layout the browser is about to do.
         requestAnimationFrame(() => this.renderAllSparklines());
+    }
+
+    listHTML(symbols) {
+        const rows = symbols.map(s => this.rowHTML(this.stocks.get(s))).join('');
+        return `
+            <table class="stocks-list">
+                <thead>
+                    <tr>
+                        <th class="pin-cell"></th>
+                        <th class="col-symbol">Stock</th>
+                        <th>Price</th>
+                        <th>Change</th>
+                        <th>Open</th>
+                        <th>High</th>
+                        <th>Low</th>
+                        <th>Close</th>
+                        <th class="col-vol">Vol</th>
+                        <th class="col-spark">30D</th>
+                        <th class="col-actions"></th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    }
+
+    rowHTML(stock) {
+        if (!stock) return '';
+        const symbol = stock.symbol;
+        const isPinned = this.isPinned(symbol);
+        const change = stock.change || 0;
+        const changePct = stock.changePercent || 0;
+        const isUp = change >= 0;
+        const trendClass = isUp ? 'trend-up' : 'trend-down';
+        const sign = isUp ? '+' : '';
+        const last = stock.dailyData && stock.dailyData[0]; // DESC, so [0] is latest
+        const open = last ? this.formatPrice(last.open) : '—';
+        const high = last ? this.formatPrice(last.high) : '—';
+        const low = last ? this.formatPrice(last.low) : '—';
+        const close = last ? this.formatPrice(last.close) : '—';
+        const vol = last ? this.formatVolume(last.volume) : '—';
+        const pinnedRowClass = isPinned ? ' pinned' : '';
+
+        return `
+            <tr data-symbol="${symbol}" data-action="open-chart"${pinnedRowClass ? ` class="${pinnedRowClass.trim()}"` : ''}>
+                <td class="pin-cell" data-stop="1">
+                    <button type="button" class="pin-btn ${isPinned ? 'is-pinned' : ''}"
+                        data-action="pin" data-symbol="${symbol}" title="${isPinned ? 'Unpin' : 'Pin'}">
+                        <svg class="w-4 h-4" fill="${isPinned ? 'currentColor' : 'none'}" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2l3.09 6.32L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.05L12 2z"></path>
+                        </svg>
+                    </button>
+                </td>
+                <td class="col-symbol">
+                    <div class="row-symbol">${symbol}</div>
+                    <div class="row-name">${this._escape(stock.name || '')}</div>
+                </td>
+                <td class="col-num-strong">${this.formatPrice(stock.currentPrice || 0)}</td>
+                <td class="${trendClass}">${sign}${changePct.toFixed(2)}%</td>
+                <td>${open}</td>
+                <td>${high}</td>
+                <td>${low}</td>
+                <td class="col-num-strong">${close}</td>
+                <td class="col-vol">${vol}</td>
+                <td class="col-spark">
+                    <canvas class="stock-card-sparkline" data-symbol="${symbol}"></canvas>
+                </td>
+                <td class="col-actions">
+                    <div class="col-actions-inner">
+                        <button type="button" class="stock-card-action-btn js-sync-btn"
+                            data-action="sync" data-symbol="${symbol}" title="Sync data">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                            </svg>
+                        </button>
+                        <button type="button" class="stock-card-action-btn is-danger"
+                            data-action="remove" data-symbol="${symbol}" title="Remove">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </td>
+            </tr>
+        `;
     }
 
     cardHTML(stock) {
