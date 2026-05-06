@@ -1693,3 +1693,105 @@ tr.pinned-row:hover {
 }
 
 .dark .stocks-history .ohlc-empty { color: #4b5563; }
+
+/* ============================================================
+   Mobile (≤640px) refinements: denser cards, tighter list,
+   compact K-line modal so the chart isn't crammed.
+   ============================================================ */
+@media (max-width: 640px) {
+  /* Cards: more visible per screen, smaller sparkline */
+  .stocks-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .stock-card {
+    padding: 12px 14px;
+    border-radius: 12px;
+  }
+  .stock-card-head { margin-bottom: 8px; }
+  .stock-card-symbol { font-size: 16px; }
+  .stock-card-price { font-size: 22px; }
+  .stock-card-change { font-size: 12px; }
+  .stock-card-sparkline-wrap {
+    margin: 8px 0;
+    height: 40px;
+  }
+  .stock-card-sparkline { height: 40px; }
+  .stock-card-foot { font-size: 10px; }
+  .stock-card-action-btn {
+    width: 30px;
+    height: 30px;
+  }
+
+  /* List view: hide Open/High/Low columns and condense paddings.
+     Close stays since it's roughly the current price. Sparkline / vol
+     were already hidden by 1100/960px breakpoints. */
+  .stocks-list thead th:nth-child(5),
+  .stocks-list thead th:nth-child(6),
+  .stocks-list thead th:nth-child(7),
+  .stocks-list tbody td:nth-child(5),
+  .stocks-list tbody td:nth-child(6),
+  .stocks-list tbody td:nth-child(7) {
+    display: none;
+  }
+  .stocks-list thead th {
+    padding: 8px 8px;
+    font-size: 10px;
+    letter-spacing: 0.02em;
+  }
+  .stocks-list tbody td { padding: 10px 8px; }
+  .stocks-list .col-symbol { min-width: 0; }
+  .stocks-list .row-symbol { font-size: 13px; }
+  .stocks-list .row-name {
+    font-size: 10px;
+    max-width: 110px;
+  }
+  .stocks-list .col-actions-inner { gap: 0; }
+
+  /* K-line modal: less internal padding, tighter controls */
+  #chartModal .px-6 { padding-left: 12px !important; padding-right: 12px !important; }
+  #chartModal .pt-6 { padding-top: 14px !important; }
+  #chartModal .py-4 { padding-top: 10px !important; padding-bottom: 10px !important; }
+  #chartModal h3 { font-size: 16px !important; }
+  #chartModal #chartSubtitle { font-size: 11px !important; }
+
+  /* Period button group: tighter spacing, allow wrap so all 7 fit */
+  .chart-period-group {
+    flex-wrap: wrap;
+    gap: 3px;
+    padding: 3px;
+    width: 100%;
+    justify-content: stretch;
+  }
+  .chart-period-btn {
+    padding: 5px 9px;
+    font-size: 12px;
+    flex: 1 0 auto;
+  }
+  .chart-refresh-btn {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+  .chart-canvas-container { padding: 8px !important; border-radius: 8px; }
+
+  /* Tooltip: smaller font + min-width so it fits comfortably */
+  .chart-tooltip {
+    font-size: 11px;
+    padding: 6px 10px;
+    min-width: 130px;
+    line-height: 1.4;
+  }
+  .chart-tooltip-time { margin-bottom: 2px; }
+
+  /* Stats grid below chart: keep 2-col but tighter */
+  .chart-stat-item { padding: 10px 12px; border-radius: 10px; }
+  .chart-stat-label { font-size: 11px; }
+  .chart-stat-value { font-size: 15px; }
+  .chart-stat-sub { font-size: 10px; }
+}
+
+/* Even tighter on very narrow phones (iPhone SE etc.) */
+@media (max-width: 380px) {
+  .stock-card-name { max-width: 130px; }
+  .chart-period-btn { padding: 5px 6px; font-size: 11px; }
+}

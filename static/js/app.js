@@ -1603,10 +1603,10 @@ class StockTracker {
         const canvas = document.getElementById('candlestickChart');
         const ctx = canvas.getContext('2d');
 
-        // Logical canvas height. Bumped from 400→440 to give the rotated date
-        // labels at the bottom enough room — at 400 they were getting clipped
-        // off the bottom edge.
-        const canvasHeight = 440;
+        // Logical canvas height. On phones drop to 300 so the modal still
+        // leaves room for the period buttons + stats grid below the chart;
+        // on desktop keep 440 so rotated date labels at the bottom don't clip.
+        const canvasHeight = window.innerWidth <= 640 ? 300 : 440;
 
         // Force fill the parent. Without this, the canvas's `width="800"` HTML
         // attribute leaves it at 800 CSS-px wide inside a wider modal, with a
