@@ -37,21 +37,40 @@ func (StockMinuteData) TableName() string {
 	return "stock_minute_data"
 }
 
-// WatchedStock represents stocks that are being monitored
+// WatchedStock represents stocks that are being monitored.
+// Owned by a User. (UserID, Symbol) is the natural key — same symbol may appear
+// for multiple users. Existing rows from before the auth migration may have
+// UserID = 0; those are claimed by the first registered user (see auth.go).
 type WatchedStock struct {
-	ID        uint      `gorm:"primaryKey" json:"id"`
-	Symbol    string    `gorm:"uniqueIndex;index:idx_watched_stocks_symbol;not null" json:"symbol"`
-	Name      string    `gorm:"" json:"name"`
-	AddedAt   time.Time `gorm:"autoCreateTime" json:"addedAt"`
+	ID        uint       `gorm:"primaryKey" json:"id"`
+	UserID    uint       `gorm:"index;not null;default:0" json:"userId"`
+	Symbol    string     `gorm:"index;not null" json:"symbol"`
+	Name      string     `gorm:"" json:"name"`
+	Pinned    bool       `gorm:"default:false;not null" json:"pinned"`
+	AddedAt   time.Time  `gorm:"autoCreateTime" json:"addedAt"`
 	LastSync  *time.Time `gorm:"" json:"lastSync"`
-	IsActive  bool      `gorm:"default:true;not null" json:"isActive"`
-	CreatedAt time.Time `gorm:"autoCreateTime" json:"createdAt"`
-	UpdatedAt time.Time `gorm:"autoUpdateTime" json:"updatedAt"`
+	IsActive  bool       `gorm:"default:true;not null" json:"isActive"`
+	CreatedAt time.Time  `gorm:"autoCreateTime" json:"createdAt"`
+	UpdatedAt time.Time  `gorm:"autoUpdateTime" json:"updatedAt"`
 }
 
 // TableName specifies the table name for WatchedStock
 func (WatchedStock) TableName() string {
 	return "watched_stocks"
+}
+
+// User represents a registered account. Email is the login identifier;
+// password is bcrypt-hashed.
+type User struct {
+	ID           uint      `gorm:"primaryKey" json:"id"`
+	Email        string    `gorm:"uniqueIndex;not null" json:"email"`
+	PasswordHash string    `gorm:"not null" json:"-"`
+	CreatedAt    time.Time `gorm:"autoCreateTime" json:"createdAt"`
+	UpdatedAt    time.Time `gorm:"autoUpdateTime" json:"-"`
+}
+
+func (User) TableName() string {
+	return "users"
 }
 
 // StockDailySummary represents daily aggregated stock data
@@ -78,4 +97,5 @@ var allModels = []interface{}{
 	&StockMinuteData{},
 	&WatchedStock{},
 	&StockDailySummary{},
+	&User{},
 }

@@ -1357,6 +1357,190 @@ tr.pinned-row:hover {
 .dark .stocks-list .pin-btn.is-pinned { color: #fbbf24; }
 .dark .stocks-list .pin-btn:hover { background: #374151; color: #fbbf24; }
 
+/* Auth overlay: full-screen until the user logs in */
+.auth-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: linear-gradient(135deg, #f9fafb 0%, #e5e7eb 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.dark .auth-overlay {
+  background: linear-gradient(135deg, #0f172a 0%, #111827 100%);
+}
+
+.auth-overlay.hidden { display: none; }
+
+.auth-card {
+  width: 100%;
+  max-width: 380px;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 18px;
+  padding: 28px 28px 24px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.08);
+}
+
+.dark .auth-card {
+  background: #1f2937;
+  border-color: #374151;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+}
+
+.auth-brand {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.auth-brand h2 {
+  font-size: 20px;
+  font-weight: 700;
+  margin-top: 8px;
+  color: #111827;
+}
+
+.dark .auth-brand h2 { color: #f9fafb; }
+
+.auth-tagline {
+  font-size: 13px;
+  color: #6b7280;
+  margin-top: 4px;
+}
+
+.dark .auth-tagline { color: #9ca3af; }
+
+.auth-tabs {
+  display: flex;
+  background: #f3f4f6;
+  border-radius: 10px;
+  padding: 3px;
+  margin-bottom: 16px;
+}
+
+.dark .auth-tabs { background: #374151; }
+
+.auth-tab {
+  flex: 1;
+  padding: 8px 0;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  color: #6b7280;
+  transition: all 0.15s ease;
+}
+
+.auth-tab.active {
+  background: white;
+  color: #111827;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.dark .auth-tab { color: #9ca3af; }
+.dark .auth-tab.active { background: #1f2937; color: #f9fafb; }
+
+.auth-banner {
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  border: 1px solid #fbbf24;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: #78350f;
+  margin-bottom: 14px;
+  line-height: 1.5;
+}
+
+.auth-banner.hidden { display: none; }
+
+.dark .auth-banner {
+  background: rgba(251, 191, 36, 0.12);
+  border-color: rgba(251, 191, 36, 0.5);
+  color: #fde68a;
+}
+
+.auth-form { display: flex; flex-direction: column; gap: 12px; }
+.auth-form.hidden { display: none; }
+
+.auth-form label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: #4b5563;
+}
+
+.dark .auth-form label { color: #d1d5db; }
+
+.auth-form input {
+  width: 100%;
+  margin-top: 4px;
+  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #f9fafb;
+  font-size: 14px;
+  color: #111827;
+  transition: all 0.15s ease;
+}
+
+.auth-form input:focus {
+  outline: none;
+  border-color: #3b82f6;
+  background: white;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.dark .auth-form input {
+  background: #111827;
+  border-color: #374151;
+  color: #f9fafb;
+}
+
+.dark .auth-form input:focus {
+  background: #0f1419;
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.2);
+}
+
+.auth-submit {
+  margin-top: 4px;
+  padding: 10px 16px;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.auth-submit:hover { background: #2563eb; }
+.auth-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.auth-error {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+  border-radius: 10px;
+  font-size: 13px;
+}
+
+.auth-error.hidden { display: none; }
+
+.dark .auth-error {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+}
+
 /* Hide less-critical columns at narrower widths so OHLC keeps priority */
 @media (max-width: 1100px) {
   .stocks-list .col-spark { display: none; }

@@ -44,6 +44,16 @@ func (d *Database) createAdditionalIndexes() error {
 		return fmt.Errorf("failed to create unique index: %v", err)
 	}
 
+	// Drop the old single-column unique index on watched_stocks.symbol — pre-auth
+	// installs had it; multi-user installs need the composite index below instead.
+	if err := d.db.Exec("DROP INDEX IF EXISTS idx_watched_stocks_symbol").Error; err != nil {
+		return fmt.Errorf("failed to drop old watched_stocks symbol index: %v", err)
+	}
+	// Composite (user_id, symbol) uniqueness so each user can have any symbol once.
+	if err := d.db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_watched_stocks_user_symbol ON watched_stocks(user_id, symbol)").Error; err != nil {
+		return fmt.Errorf("failed to create watched_stocks composite unique index: %v", err)
+	}
+
 	return nil
 }
 
@@ -188,14 +198,15 @@ func (d *Database) Close() error {
 }
 
 // Watched Stocks operations
-func (d *Database) AddWatchedStock(symbol, name string) error {
+func (d *Database) AddWatchedStock(userID uint, symbol, name string) error {
 	stock := WatchedStock{
+		UserID:   userID,
 		Symbol:   symbol,
 		Name:     name,
 		IsActive: true,
 	}
 
-	result := d.db.Where("symbol = ?", symbol).FirstOrCreate(&stock)
+	result := d.db.Where("user_id = ? AND symbol = ?", userID, symbol).FirstOrCreate(&stock)
 	if result.Error != nil {
 		return fmt.Errorf("failed to add watched stock: %v", result.Error)
 	}
@@ -203,17 +214,17 @@ func (d *Database) AddWatchedStock(symbol, name string) error {
 	return nil
 }
 
-func (d *Database) RemoveWatchedStock(symbol string) error {
-	result := d.db.Where("symbol = ?", symbol).Delete(&WatchedStock{})
+func (d *Database) RemoveWatchedStock(userID uint, symbol string) error {
+	result := d.db.Where("user_id = ? AND symbol = ?", userID, symbol).Delete(&WatchedStock{})
 	if result.Error != nil {
 		return fmt.Errorf("failed to remove watched stock: %v", result.Error)
 	}
 	return nil
 }
 
-func (d *Database) GetWatchedStocks() ([]WatchedStock, error) {
+func (d *Database) GetWatchedStocks(userID uint) ([]WatchedStock, error) {
 	var stocks []WatchedStock
-	result := d.db.Where("is_active = ?", true).Order("added_at DESC").Find(&stocks)
+	result := d.db.Where("user_id = ? AND is_active = ?", userID, true).Order("added_at DESC").Find(&stocks)
 	if result.Error != nil {
 		return nil, fmt.Errorf("failed to query watched stocks: %v", result.Error)
 	}
@@ -221,7 +232,24 @@ func (d *Database) GetWatchedStocks() ([]WatchedStock, error) {
 	return stocks, nil
 }
 
+// GetAllUniqueSymbols returns the union of every user's watchlist as a
+// deduplicated symbol list. Used by the scheduler to refresh shared market
+// data once per symbol regardless of how many users watch it.
+func (d *Database) GetAllUniqueSymbols() ([]string, error) {
+	var symbols []string
+	err := d.db.Model(&WatchedStock{}).
+		Where("is_active = ?", true).
+		Distinct("symbol").
+		Pluck("symbol", &symbols).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to list unique symbols: %v", err)
+	}
+	return symbols, nil
+}
+
 func (d *Database) UpdateLastSync(symbol string) error {
+	// Updates last_sync for every user who watches this symbol — sync is shared
+	// market data, so all watchers were just refreshed at the same time.
 	result := d.db.Model(&WatchedStock{}).
 		Where("symbol = ?", symbol).
 		Update("last_sync", time.Now())
@@ -229,6 +257,49 @@ func (d *Database) UpdateLastSync(symbol string) error {
 		return fmt.Errorf("failed to update last sync: %v", result.Error)
 	}
 	return nil
+}
+
+// SetPinned toggles the pinned flag for a user's watched stock.
+func (d *Database) SetPinned(userID uint, symbol string, pinned bool) error {
+	result := d.db.Model(&WatchedStock{}).
+		Where("user_id = ? AND symbol = ?", userID, symbol).
+		Update("pinned", pinned)
+	if result.Error != nil {
+		return fmt.Errorf("failed to update pinned: %v", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("stock not found in watchlist")
+	}
+	return nil
+}
+
+// CountUsers returns the total number of registered users — used by the
+// onboarding endpoint to decide whether the upcoming registration is the
+// "first user" who'll inherit unclaimed watchlist rows.
+func (d *Database) CountUsers() (int64, error) {
+	var n int64
+	err := d.db.Model(&User{}).Count(&n).Error
+	return n, err
+}
+
+// CountUnclaimedStocks returns watched_stocks with user_id = 0 (i.e. rows
+// from before the auth migration that need to be claimed).
+func (d *Database) CountUnclaimedStocks() (int64, error) {
+	var n int64
+	err := d.db.Model(&WatchedStock{}).Where("user_id = 0").Count(&n).Error
+	return n, err
+}
+
+// ClaimUnclaimedStocks assigns all watched_stocks with user_id = 0 to the
+// given user. Run inside the registration transaction.
+func (d *Database) ClaimUnclaimedStocks(tx *gorm.DB, userID uint) (int64, error) {
+	if tx == nil {
+		tx = d.db
+	}
+	res := tx.Model(&WatchedStock{}).
+		Where("user_id = 0").
+		Update("user_id", userID)
+	return res.RowsAffected, res.Error
 }
 
 // Daily Summary operations

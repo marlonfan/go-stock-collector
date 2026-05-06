@@ -8,12 +8,13 @@ import (
 
 // WatchedStockAPI is the API-compatible version of WatchedStock
 type WatchedStockAPI struct {
-	ID        int       `json:"id"`
-	Symbol    string    `json:"symbol"`
-	Name      string    `json:"name"`
-	AddedAt   time.Time `json:"addedAt"`
+	ID        int        `json:"id"`
+	Symbol    string     `json:"symbol"`
+	Name      string     `json:"name"`
+	AddedAt   time.Time  `json:"addedAt"`
 	LastSync  *time.Time `json:"lastSync"`
-	IsActive  bool      `json:"isActive"`
+	IsActive  bool       `json:"isActive"`
+	Pinned    bool       `json:"pinned"`
 }
 
 // DailySummaryAPI is the API-compatible version of StockDailySummary

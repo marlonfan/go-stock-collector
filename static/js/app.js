@@ -11,7 +11,8 @@ class StockTracker {
         this.suppressCardRerender = false;
         this.activeSearchSource = null; // 'modal' | 'global'
         this.searchDebounce = { modal: null, global: null };
-        this.viewMode = this._initialViewMode(); // 'list' | 'cards'
+        this.viewMode = this._initialViewMode(); // 'list' | 'cards' | 'grid'
+        this.currentUser = null; // {id, email}
         this.init();
     }
 
@@ -23,14 +24,212 @@ class StockTracker {
         return (window.innerWidth >= 768) ? 'list' : 'cards';
     }
 
-    init() {
+    async init() {
         this.setupEventListeners();
         this.setupGlobalSearch();
         this.setupDarkModeToggle();
         this.setupSyncAll();
         this.setupViewModeToggle();
         this.setupKeyboardShortcuts();
+        this.setupAuth();
+
+        // Decide whether the user can see the app or must log in first.
+        const me = await this.fetchMe();
+        if (!me) {
+            await this.showAuthOverlay();
+            return;
+        }
+        this.applyAuthSuccess(me);
         this.loadWatchedStocks();
+    }
+
+    // ---------- Auth ----------
+
+    setupAuth() {
+        // Tab switching
+        document.querySelectorAll('.auth-tab').forEach(tab => {
+            tab.addEventListener('click', () => this.switchAuthTab(tab.dataset.authTab));
+        });
+
+        const loginForm = document.getElementById('loginForm');
+        if (loginForm) {
+            loginForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                const fd = new FormData(loginForm);
+                this.submitAuth('login', { email: fd.get('email'), password: fd.get('password') });
+            });
+        }
+
+        const registerForm = document.getElementById('registerForm');
+        if (registerForm) {
+            registerForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                const fd = new FormData(registerForm);
+                this.submitAuth('register', {
+                    email: fd.get('email'),
+                    password: fd.get('password'),
+                    inviteCode: fd.get('inviteCode'),
+                });
+            });
+        }
+
+        const logoutBtn = document.getElementById('logoutBtn');
+        if (logoutBtn) {
+            logoutBtn.addEventListener('click', () => this.logout());
+        }
+    }
+
+    switchAuthTab(name) {
+        document.querySelectorAll('.auth-tab').forEach(t => {
+            t.classList.toggle('active', t.dataset.authTab === name);
+        });
+        document.getElementById('loginForm').classList.toggle('hidden', name !== 'login');
+        document.getElementById('registerForm').classList.toggle('hidden', name !== 'register');
+        this.setAuthError('');
+    }
+
+    async fetchMe() {
+        try {
+            const r = await fetch('/api/auth/me', { credentials: 'same-origin' });
+            if (!r.ok) return null;
+            return await r.json();
+        } catch (e) {
+            return null;
+        }
+    }
+
+    async showAuthOverlay() {
+        const overlay = document.getElementById('authOverlay');
+        if (!overlay) return;
+        overlay.classList.remove('hidden');
+        // Probe onboarding (public endpoint) to show "你将接管 X 只股票" hint
+        try {
+            const r = await fetch('/api/auth/onboarding');
+            if (r.ok) {
+                const info = await r.json();
+                this._renderOnboardingHint(info);
+                // If there are unclaimed stocks, default to the Register tab so
+                // the inheriting flow is the primary action.
+                if (info.unclaimedStockCount > 0 && !info.hasAnyUser) {
+                    this.switchAuthTab('register');
+                }
+            }
+        } catch (e) { /* non-fatal */ }
+        const firstField = document.querySelector('.auth-form:not(.hidden) input');
+        if (firstField) firstField.focus();
+    }
+
+    _renderOnboardingHint(info) {
+        const banner = document.getElementById('authOnboardingBanner');
+        if (!banner) return;
+        if (info && !info.hasAnyUser && info.unclaimedStockCount > 0) {
+            banner.textContent = `🎁 这台服务器上还有 ${info.unclaimedStockCount} 只未认领的股票,注册第一个账号将自动继承。`;
+            banner.classList.remove('hidden');
+        } else {
+            banner.classList.add('hidden');
+        }
+    }
+
+    async submitAuth(kind, body) {
+        this.setAuthError('');
+        const url = kind === 'login' ? '/api/auth/login' : '/api/auth/register';
+        try {
+            const r = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify(body),
+            });
+            const data = await r.json().catch(() => ({}));
+            if (!r.ok) {
+                this.setAuthError(data.error || '操作失败');
+                return;
+            }
+            // Hide overlay, swap to app, fetch watchlist
+            document.getElementById('authOverlay').classList.add('hidden');
+            this.applyAuthSuccess(data);
+            await this._migrateLegacyPinsIfAny();
+            if (kind === 'register' && data.claimedStocks > 0) {
+                this.showSuccess(`已继承 ${data.claimedStocks} 只股票`);
+            }
+            await this.loadWatchedStocks();
+        } catch (e) {
+            this.setAuthError('网络错误,请重试');
+        }
+    }
+
+    applyAuthSuccess(user) {
+        this.currentUser = user;
+        const logoutBtn = document.getElementById('logoutBtn');
+        if (logoutBtn) {
+            logoutBtn.classList.remove('hidden');
+            logoutBtn.title = `Logout (${user.email})`;
+        }
+    }
+
+    setAuthError(msg) {
+        const el = document.getElementById('authError');
+        if (!el) return;
+        if (!msg) {
+            el.classList.add('hidden');
+            el.textContent = '';
+            return;
+        }
+        el.textContent = msg;
+        el.classList.remove('hidden');
+    }
+
+    async logout() {
+        try {
+            await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
+        } catch (e) { /* ignore */ }
+        this.currentUser = null;
+        this.stocks.clear();
+        this.chartCache.clear();
+        const logoutBtn = document.getElementById('logoutBtn');
+        if (logoutBtn) logoutBtn.classList.add('hidden');
+        // Clear forms then surface the overlay again
+        document.querySelectorAll('.auth-form').forEach(f => f.reset());
+        this.setAuthError('');
+        await this.showAuthOverlay();
+    }
+
+    // Migrate localStorage pinnedStocks → server pin column on first login,
+    // then drop the localStorage key. Idempotent and per-device.
+    async _migrateLegacyPinsIfAny() {
+        let legacy = null;
+        try { legacy = localStorage.getItem('pinnedStocks'); } catch (e) { return; }
+        if (!legacy) return;
+        let symbols;
+        try { symbols = JSON.parse(legacy); } catch (e) { symbols = null; }
+        if (!Array.isArray(symbols) || symbols.length === 0) {
+            try { localStorage.removeItem('pinnedStocks'); } catch (e) {}
+            return;
+        }
+        // Best-effort: try each symbol; ignore errors (e.g. not in user's watchlist)
+        await Promise.all(symbols.map(s =>
+            fetch(`/api/stocks/${encodeURIComponent(s)}/pin`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({ pinned: true }),
+            }).catch(() => null)
+        ));
+        try { localStorage.removeItem('pinnedStocks'); } catch (e) {}
+    }
+
+    // Centralized fetch wrapper: any 401 from the API while logged in
+    // surfaces the auth overlay (session expired / cleared).
+    async _apiFetch(url, opts = {}) {
+        const merged = Object.assign({ credentials: 'same-origin' }, opts);
+        const r = await fetch(url, merged);
+        if (r.status === 401 && this.currentUser) {
+            this.currentUser = null;
+            const logoutBtn = document.getElementById('logoutBtn');
+            if (logoutBtn) logoutBtn.classList.add('hidden');
+            await this.showAuthOverlay();
+        }
+        return r;
     }
 
     setupViewModeToggle() {
@@ -1703,37 +1902,37 @@ class StockTracker {
         return `${date.getUTCFullYear()}.${pad(date.getUTCMonth() + 1)}.${pad(date.getUTCDate())}`;
     }
 
-    // Pinning functionality methods
+    // Pinning state lives on the server now (watched_stocks.pinned column).
+    // These helpers read from the in-memory mirror populated by /api/stocks.
     getPinnedStocks() {
-        const pinned = localStorage.getItem('pinnedStocks');
-        return pinned ? JSON.parse(pinned) : [];
-    }
-
-    savePinnedStocks(pinnedStocks) {
-        localStorage.setItem('pinnedStocks', JSON.stringify(pinnedStocks));
+        return Array.from(this.stocks.values()).filter(s => s && s.pinned).map(s => s.symbol);
     }
 
     isPinned(symbol) {
-        const pinnedStocks = this.getPinnedStocks();
-        return pinnedStocks.includes(symbol);
+        const s = this.stocks.get(symbol);
+        return !!(s && s.pinned);
     }
 
-    togglePin(symbol) {
-        const pinnedStocks = this.getPinnedStocks();
-        const index = pinnedStocks.indexOf(symbol);
-
-        if (index > -1) {
-            // Unpin
-            pinnedStocks.splice(index, 1);
-            this.showSuccess(`Unpinned ${symbol}`);
-        } else {
-            // Pin
-            pinnedStocks.push(symbol);
-            this.showSuccess(`Pinned ${symbol}`);
-        }
-
-        this.savePinnedStocks(pinnedStocks);
+    async togglePin(symbol) {
+        const stock = this.stocks.get(symbol);
+        if (!stock) return;
+        const newPinned = !stock.pinned;
+        // Optimistic update so the UI feels snappy; revert on failure.
+        stock.pinned = newPinned;
         this.renderStocks();
+        try {
+            const r = await this._apiFetch(`/api/stocks/${encodeURIComponent(symbol)}/pin`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pinned: newPinned }),
+            });
+            if (!r.ok) throw new Error('failed');
+            this.showSuccess(newPinned ? `Pinned ${symbol}` : `Unpinned ${symbol}`);
+        } catch (e) {
+            stock.pinned = !newPinned;
+            this.renderStocks();
+            this.showError(`Pin update failed for ${symbol}`);
+        }
     }
 }
 

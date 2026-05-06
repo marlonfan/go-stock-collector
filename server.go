@@ -3,16 +3,18 @@ package main
 import (
 	"log"
 
+	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
 
 type WebServer struct {
-	collector *StockCollector
-	scheduler *Scheduler
-	router    *gin.Engine
+	collector  *StockCollector
+	scheduler  *Scheduler
+	router     *gin.Engine
+	inviteCode string
 }
 
-func NewWebServer(dbPath string, enableScheduler bool) (*WebServer, error) {
+func NewWebServer(dbPath string, enableScheduler bool, inviteCode string) (*WebServer, error) {
 	collector, err := NewStockCollector(dbPath)
 	if err != nil {
 		return nil, err
@@ -22,9 +24,18 @@ func NewWebServer(dbPath string, enableScheduler bool) (*WebServer, error) {
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery())
 
+	// Session middleware. Cookie store keeps session data signed inside the
+	// cookie itself, so we don't need a server-side session table.
+	secret, err := loadSessionSecret()
+	if err != nil {
+		return nil, err
+	}
+	router.Use(sessions.Sessions(sessionName, sessionStore(secret)))
+
 	server := &WebServer{
-		collector: collector,
-		router:    router,
+		collector:  collector,
+		router:     router,
+		inviteCode: inviteCode,
 	}
 
 	// Initialize scheduler if enabled
@@ -48,18 +59,30 @@ func (ws *WebServer) setupRoutes() {
 	ws.router.StaticFile("/", "./static/index.html")
 	ws.router.StaticFile("/index.html", "./static/index.html")
 
-	// API routes
-	api := ws.router.Group("/api")
+	// Public auth endpoints
+	auth := ws.router.Group("/api/auth")
+	{
+		auth.POST("/register", ws.handleRegister)
+		auth.POST("/login", ws.handleLogin)
+		auth.GET("/onboarding", ws.handleOnboarding)
+		// Authenticated auth helpers
+		auth.GET("/me", authMiddleware(), ws.handleMe)
+		auth.POST("/logout", authMiddleware(), ws.handleLogout)
+	}
+
+	// Authenticated API routes — every read/write of stock data requires login
+	api := ws.router.Group("/api", authMiddleware())
 	{
 		// Stock search
 		api.GET("/search", ws.searchStocks)
 
-		// Stock management
+		// Stock management (per-user watchlist)
 		api.GET("/stocks", ws.getWatchedStocks)
 		api.POST("/stocks", ws.addWatchedStock)
 		api.DELETE("/stocks/:symbol", ws.removeWatchedStock)
+		api.PATCH("/stocks/:symbol/pin", ws.setStockPinned)
 
-		// Stock data
+		// Stock data (shared market cache, gated to authenticated users)
 		api.GET("/stocks/:symbol/summary", ws.getStockSummary)
 		api.GET("/stocks/:symbol/data", ws.getStockData)
 		api.POST("/stocks/:symbol/sync", ws.syncStockData)

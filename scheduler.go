@@ -51,43 +51,41 @@ func (s *Scheduler) Start() {
 	log.Println("[Scheduler] Scheduler started - will update all watched stocks daily at 8:00 AM China time")
 }
 
-// updateAllWatchedStocks fetches latest data for all watched stocks
+// updateAllWatchedStocks fetches latest data for the union of every user's
+// watchlist (deduplicated). Market data is shared across users, so each
+// unique symbol is synced once per scheduler run.
 func (s *Scheduler) updateAllWatchedStocks() {
-	stocks, err := s.database.GetWatchedStocks()
+	symbols, err := s.database.GetAllUniqueSymbols()
 	if err != nil {
-		log.Printf("[Scheduler] Error getting watched stocks: %v", err)
+		log.Printf("[Scheduler] Error getting unique symbols: %v", err)
 		return
 	}
 
-	if len(stocks) == 0 {
+	if len(symbols) == 0 {
 		log.Println("[Scheduler] No watched stocks to update")
 		return
 	}
 
-	log.Printf("[Scheduler] Updating %d watched stocks...", len(stocks))
+	log.Printf("[Scheduler] Updating %d unique symbols...", len(symbols))
 
 	successCount := 0
 	failCount := 0
 
-	for _, stock := range stocks {
-		log.Printf("[Scheduler] Updating %s (%s)...", stock.Symbol, stock.Name)
+	for _, symbol := range symbols {
+		log.Printf("[Scheduler] Updating %s...", symbol)
 
-		// Use intelligent incremental update (default 1 day, will adjust based on existing data)
-		err := s.collector.CollectHistoricalData(stock.Symbol, 1)
+		err := s.collector.CollectHistoricalData(symbol, 1)
 		if err != nil {
-			log.Printf("[Scheduler] Failed to update %s: %v", stock.Symbol, err)
+			log.Printf("[Scheduler] Failed to update %s: %v", symbol, err)
 			failCount++
 			continue
 		}
 
-		// Update last sync time
-		if err := s.database.UpdateLastSync(stock.Symbol); err != nil {
-			log.Printf("[Scheduler] Warning: failed to update last sync time for %s: %v", stock.Symbol, err)
+		if err := s.database.UpdateLastSync(symbol); err != nil {
+			log.Printf("[Scheduler] Warning: failed to update last sync time for %s: %v", symbol, err)
 		}
 
 		successCount++
-
-		// Small delay between requests to avoid rate limiting
 		time.Sleep(2 * time.Second)
 	}
 

@@ -23,6 +23,9 @@ go.work
 *.db-journal
 *.db.backup
 
+# Session signing key (auto-generated on first run; never commit)
+session.key
+
 # IDE
 .idea/
 .vscode/

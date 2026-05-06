@@ -11,14 +11,15 @@ import (
 )
 
 func (ws *WebServer) getWatchedStocks(c *gin.Context) {
-	stocks, err := ws.collector.database.GetWatchedStocks()
+	uid := c.MustGet("userID").(uint)
+	stocks, err := ws.collector.database.GetWatchedStocks(uid)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	// Convert GORM models to API models
-	var apiStocks []WatchedStockAPI
+	apiStocks := make([]WatchedStockAPI, 0, len(stocks))
 	for _, stock := range stocks {
 		apiStocks = append(apiStocks, WatchedStockAPI{
 			ID:       int(stock.ID),
@@ -27,6 +28,7 @@ func (ws *WebServer) getWatchedStocks(c *gin.Context) {
 			AddedAt:  stock.AddedAt,
 			LastSync: stock.LastSync,
 			IsActive: stock.IsActive,
+			Pinned:   stock.Pinned,
 		})
 	}
 
@@ -34,6 +36,7 @@ func (ws *WebServer) getWatchedStocks(c *gin.Context) {
 }
 
 func (ws *WebServer) addWatchedStock(c *gin.Context) {
+	uid := c.MustGet("userID").(uint)
 	var req AddStockRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -46,8 +49,7 @@ func (ws *WebServer) addWatchedStock(c *gin.Context) {
 		return
 	}
 
-	// Add to watched stocks
-	if err := ws.collector.database.AddWatchedStock(symbol, req.Name); err != nil {
+	if err := ws.collector.database.AddWatchedStock(uid, symbol, req.Name); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -59,13 +61,14 @@ func (ws *WebServer) addWatchedStock(c *gin.Context) {
 }
 
 func (ws *WebServer) removeWatchedStock(c *gin.Context) {
+	uid := c.MustGet("userID").(uint)
 	symbol := strings.ToUpper(c.Param("symbol"))
 	if symbol == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Symbol is required"})
 		return
 	}
 
-	if err := ws.collector.database.RemoveWatchedStock(symbol); err != nil {
+	if err := ws.collector.database.RemoveWatchedStock(uid, symbol); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -73,7 +76,29 @@ func (ws *WebServer) removeWatchedStock(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Stock removed successfully"})
 }
 
+func (ws *WebServer) setStockPinned(c *gin.Context) {
+	uid := c.MustGet("userID").(uint)
+	symbol := strings.ToUpper(c.Param("symbol"))
+	if symbol == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Symbol is required"})
+		return
+	}
+	var body struct {
+		Pinned bool `json:"pinned"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := ws.collector.database.SetPinned(uid, symbol, body.Pinned); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "pinned": body.Pinned})
+}
+
 func (ws *WebServer) getStockSummary(c *gin.Context) {
+	uid := c.MustGet("userID").(uint)
 	symbol := strings.ToUpper(c.Param("symbol"))
 	if symbol == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Symbol is required"})
@@ -81,7 +106,7 @@ func (ws *WebServer) getStockSummary(c *gin.Context) {
 	}
 
 	// Get watched stocks to find stock name
-	watchedStocks, err := ws.collector.database.GetWatchedStocks()
+	watchedStocks, err := ws.collector.database.GetWatchedStocks(uid)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -276,14 +301,17 @@ func aggregateMinuteBars(bars []MinuteBar, windowMin int) []MinuteBar {
 }
 
 func (ws *WebServer) syncStockData(c *gin.Context) {
+	uid := c.MustGet("userID").(uint)
 	symbol := strings.ToUpper(c.Param("symbol"))
 	if symbol == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Symbol is required"})
 		return
 	}
 
-	// Check if stock is being watched
-	watchedStocks, err := ws.collector.database.GetWatchedStocks()
+	// Check if stock is being watched by THIS user — sync is shared market
+	// data, but we still gate sync to symbols on the caller's watchlist so
+	// random users can't trigger arbitrary Yahoo fetches.
+	watchedStocks, err := ws.collector.database.GetWatchedStocks(uid)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

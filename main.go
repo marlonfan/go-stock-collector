@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+const defaultInviteCode = "caifugongchuang"
+
 func main() {
 	// Command line flags
 	mode := flag.String("mode", "web", "Run mode: web, cli")
@@ -39,8 +41,14 @@ func runWebMode(port, dbPath string, enableScheduler bool) {
 		log.Println("Scheduled updates: Disabled")
 	}
 
+	inviteCode := os.Getenv("INVITE_CODE")
+	if inviteCode == "" {
+		inviteCode = defaultInviteCode
+		log.Println("INVITE_CODE not set; using default. Override via env var to rotate.")
+	}
+
 	// Initialize web server
-	server, err := NewWebServer(dbPath, enableScheduler)
+	server, err := NewWebServer(dbPath, enableScheduler, inviteCode)
 	if err != nil {
 		log.Fatalf("Failed to initialize web server: %v", err)
 	}
