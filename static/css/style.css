@@ -27,6 +27,48 @@
   --color-down: #f87171;
 }
 
+/* ============================================================
+   Dark-mode shim for Tailwind v2 CDN.
+   Tailwind v2's CDN build uses darkMode: 'media' so its `dark:`
+   utility classes only fire under prefers-color-scheme: dark. Our
+   manual toggle adds `class="dark"` to <html>, which Tailwind
+   ignores. Without this block the body background stays white and
+   inherited text stays black even though all custom-CSS components
+   correctly switched. Mirror every dark:* utility currently used in
+   index.html to its expected color, scoped by html.dark.
+   ============================================================ */
+.dark body {
+  background-color: #111827; /* matches Tailwind dark:bg-gray-900 */
+  color: #f3f4f6;            /* matches Tailwind dark:text-gray-100 */
+}
+
+.dark .bg-white { background-color: #1f2937 !important; }
+.dark .bg-white\/80 { background-color: rgba(17, 24, 39, 0.8) !important; }
+.dark .bg-gray-50 { background-color: #111827 !important; }
+.dark .bg-gray-200 { background-color: #374151 !important; }
+.dark .bg-gray-700 { background-color: #374151 !important; }
+
+.dark .text-gray-100 { color: #f3f4f6 !important; }
+.dark .text-gray-200 { color: #e5e7eb !important; }
+.dark .text-gray-300 { color: #d1d5db !important; }
+.dark .text-gray-400 { color: #9ca3af !important; }
+.dark .text-gray-500 { color: #9ca3af !important; }
+.dark .text-gray-600 { color: #d1d5db !important; }
+.dark .text-gray-700 { color: #d1d5db !important; }
+.dark .text-gray-800 { color: #e5e7eb !important; }
+.dark .text-gray-900 { color: #f3f4f6 !important; }
+.dark .text-white { color: #f9fafb !important; }
+
+.dark .border-gray-100 { border-color: #374151 !important; }
+.dark .border-gray-200 { border-color: #374151 !important; }
+.dark .border-gray-300 { border-color: #4b5563 !important; }
+.dark .border-gray-600 { border-color: #4b5563 !important; }
+.dark .border-gray-700 { border-color: #4b5563 !important; }
+
+.dark .hover\:bg-gray-100:hover { background-color: #374151 !important; }
+.dark .hover\:bg-gray-300:hover { background-color: #4b5563 !important; }
+.dark .hover\:bg-gray-700:hover { background-color: #4b5563 !important; }
+
 /* Base Styles */
 * {
   box-sizing: border-box;
