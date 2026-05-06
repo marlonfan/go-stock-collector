@@ -18,7 +18,7 @@ class StockTracker {
     _initialViewMode() {
         let stored = null;
         try { stored = localStorage.getItem('viewMode'); } catch (e) {}
-        if (stored === 'list' || stored === 'cards') return stored;
+        if (stored === 'list' || stored === 'cards' || stored === 'grid') return stored;
         // PC default = list (better for at-a-glance OHLC scan), mobile = cards
         return (window.innerWidth >= 768) ? 'list' : 'cards';
     }
@@ -541,10 +541,13 @@ class StockTracker {
         });
 
         // Toggle layout class without dropping `hidden` (managed by show/hide methods)
-        container.classList.remove('stocks-grid', 'stocks-list-wrap');
+        container.classList.remove('stocks-grid', 'stocks-list-wrap', 'stocks-history-wrap');
         if (this.viewMode === 'list') {
             container.classList.add('stocks-list-wrap');
             container.innerHTML = this.listHTML(symbols);
+        } else if (this.viewMode === 'grid') {
+            container.classList.add('stocks-history-wrap');
+            container.innerHTML = this.gridHTML(symbols);
         } else {
             container.classList.add('stocks-grid');
             container.innerHTML = symbols.map(symbol => this.cardHTML(this.stocks.get(symbol))).join('');
@@ -637,6 +640,139 @@ class StockTracker {
                 </td>
             </tr>
         `;
+    }
+
+    // History grid: rows = stocks, columns = trading days, cells = full OHLCV.
+    // Reuses the original "horizontal grid" idea — best for scanning daily
+    // patterns across multiple stocks. Cap at the most recent 30 dates so the
+    // table stays usable with many stocks; horizontal scroll handles overflow.
+    gridHTML(symbols) {
+        const MAX_DATES = 30;
+
+        // Build the union of dates across all stocks (date-only string keys).
+        const dateSet = new Set();
+        const stockData = new Map();
+        for (const sym of symbols) {
+            const stock = this.stocks.get(sym);
+            if (!stock || !Array.isArray(stock.dailyData) || stock.dailyData.length === 0) continue;
+            stockData.set(sym, stock);
+            for (const day of stock.dailyData) {
+                if (day && day.date) dateSet.add(String(day.date).split('T')[0]);
+            }
+        }
+        if (stockData.size === 0 || dateSet.size === 0) {
+            return '<div class="text-center text-gray-500 py-8">No daily data available</div>';
+        }
+
+        const sortedDates = Array.from(dateSet).sort().reverse().slice(0, MAX_DATES);
+
+        const headerCells = sortedDates.map(d => `<th>${this._formatGridDate(d)}</th>`).join('');
+
+        const rows = symbols.filter(s => stockData.has(s)).map(sym => {
+            const stock = stockData.get(sym);
+            const isPinned = this.isPinned(sym);
+            const dayMap = new Map();
+            stock.dailyData.forEach(d => { if (d && d.date) dayMap.set(String(d.date).split('T')[0], d); });
+
+            const change = stock.change || 0;
+            const changePct = stock.changePercent || 0;
+            const isUp = change >= 0;
+            const trendClass = isUp ? 'trend-up' : 'trend-down';
+            const sign = isUp ? '+' : '';
+
+            const stockCell = `
+                <td class="col-stock">
+                    <div class="stock-meta">
+                        <div class="stock-meta-info">
+                            <div class="stock-meta-symbol" data-action="open-chart" data-symbol="${sym}" title="Open chart">${sym}</div>
+                            <div class="stock-meta-name">${this._escape(stock.name || '')}</div>
+                            <div class="stock-meta-price ${trendClass}">
+                                ${this.formatPrice(stock.currentPrice || 0)}
+                                <span style="font-size:11px;opacity:.85;">${sign}${changePct.toFixed(2)}%</span>
+                            </div>
+                        </div>
+                        <div class="stock-meta-actions">
+                            <button type="button" class="stock-card-action-btn ${isPinned ? 'is-pinned' : ''}"
+                                data-action="pin" data-symbol="${sym}" title="${isPinned ? 'Unpin' : 'Pin'}">
+                                <svg class="w-4 h-4" fill="${isPinned ? 'currentColor' : 'none'}" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2l3.09 6.32L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.05L12 2z"></path>
+                                </svg>
+                            </button>
+                            <button type="button" class="stock-card-action-btn js-sync-btn"
+                                data-action="sync" data-symbol="${sym}" title="Sync data">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                                </svg>
+                            </button>
+                            <button type="button" class="stock-card-action-btn is-danger"
+                                data-action="remove" data-symbol="${sym}" title="Remove">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </td>
+            `;
+
+            const dayCells = sortedDates.map((dateStr, idx) => {
+                const day = dayMap.get(dateStr);
+                if (!day) return '<td class="ohlc-empty">—</td>';
+
+                // Compare today's close vs yesterday's close (yesterday = next index since DESC)
+                let prevClose = null;
+                if (idx < sortedDates.length - 1) {
+                    const prev = dayMap.get(sortedDates[idx + 1]);
+                    if (prev) prevClose = prev.close;
+                }
+                // Open color: green if open >= prev close (gap up), red if gap down
+                let openTrend = '';
+                if (prevClose !== null) openTrend = day.open >= prevClose ? 'trend-up' : 'trend-down';
+                // Close color: green if close >= open (bullish bar), red if bearish
+                const closeTrend = day.close >= day.open ? 'trend-up' : 'trend-down';
+
+                return `
+                    <td>
+                        <div class="ohlc-cell">
+                            <div class="ohlc-open ${openTrend}">O ${this._formatCompact(day.open)}</div>
+                            <div class="ohlc-high">H ${this._formatCompact(day.high)}</div>
+                            <div class="ohlc-low">L ${this._formatCompact(day.low)}</div>
+                            <div class="ohlc-close ${closeTrend}">C ${this._formatCompact(day.close)}</div>
+                            <div class="ohlc-volume text-gray-500">${this.formatVolume(day.volume)}</div>
+                        </div>
+                    </td>
+                `;
+            }).join('');
+
+            return `<tr data-symbol="${sym}"${isPinned ? ' class="pinned"' : ''}>${stockCell}${dayCells}</tr>`;
+        }).join('');
+
+        return `
+            <table class="stocks-history">
+                <thead>
+                    <tr>
+                        <th class="col-stock">Stock</th>
+                        ${headerCells}
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    }
+
+    _formatGridDate(dateStr) {
+        // dateStr is "YYYY-MM-DD". Render compact MM.DD; year prefix only on Jan 1
+        // to keep the column header narrow.
+        const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+        if (!m) return dateStr;
+        const [, year, month, day] = m;
+        if (month === '01' && day === '01') return `${year}.01.01`;
+        return `${month}.${day}`;
+    }
+
+    _formatCompact(price) {
+        if (price >= 1000) return (price / 1000).toFixed(1) + 'k';
+        return price.toFixed(price < 10 ? 3 : 2);
     }
 
     cardHTML(stock) {
