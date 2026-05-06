@@ -16,6 +16,19 @@ type MinuteBar struct {
 	Volume    int64     `json:"volume"`
 }
 
+// DailyBar is a single daily OHLCV candle. Date is normalized to midnight UTC
+// of the corresponding US Eastern trading day, matching the existing
+// stock_daily_summary convention.
+type DailyBar struct {
+	Symbol string    `json:"symbol"`
+	Date   time.Time `json:"date"`
+	Open   float64   `json:"open"`
+	High   float64   `json:"high"`
+	Low    float64   `json:"low"`
+	Close  float64   `json:"close"`
+	Volume int64     `json:"volume"`
+}
+
 type StockCollector struct {
 	yahooClient *YahooFinanceClient
 	database    *Database
@@ -95,6 +108,16 @@ func (sc *StockCollector) CollectHistoricalData(symbol string, days int) error {
 		log.Printf("Warning: failed to update daily summary for %s: %v", symbol, err)
 	}
 
+	// Auto-backfill 5y of daily history if we don't have enough.
+	// Threshold of 200 covers all chart ranges up to 365D once filled
+	// and ensures this only fires on first sync (or after a reset).
+	if dailyCount, err := sc.database.CountDailySummary(symbol); err == nil && dailyCount < 200 {
+		log.Printf("Daily summary count for %s is low (%d), running 5y backfill", symbol, dailyCount)
+		if _, backfillErr := sc.BackfillDailyHistory(symbol, "5y"); backfillErr != nil {
+			log.Printf("Warning: daily backfill failed for %s: %v", symbol, backfillErr)
+		}
+	}
+
 	// Log statistics
 	count, earliest, latest, err := sc.database.GetDataStats(symbol)
 	if err != nil {
@@ -161,6 +184,29 @@ func (sc *StockCollector) DisplaySampleData(symbol string, limit int) error {
 	}
 
 	return nil
+}
+
+// BackfillDailyHistory fetches daily OHLCV from Yahoo (interval=1d) for the
+// given range token (e.g. "5y", "2y", "max") and inserts any missing rows into
+// stock_daily_summary. Existing rows are not overwritten — recent days that
+// were already aggregated from minute data keep their (more accurate) values.
+func (sc *StockCollector) BackfillDailyHistory(symbol, rangeStr string) (int, error) {
+	bars, err := sc.yahooClient.GetDailyHistory(symbol, rangeStr)
+	if err != nil {
+		return 0, fmt.Errorf("failed to fetch daily history: %v", err)
+	}
+	if len(bars) == 0 {
+		log.Printf("No daily history returned for %s", symbol)
+		return 0, nil
+	}
+
+	inserted, err := sc.database.InsertDailySummaryBatch(bars)
+	if err != nil {
+		return 0, fmt.Errorf("failed to insert daily history: %v", err)
+	}
+	log.Printf("Backfill for %s: inserted %d new daily bars (fetched %d, range=%s)",
+		symbol, inserted, len(bars), rangeStr)
+	return inserted, nil
 }
 
 func (sc *StockCollector) Close() {

@@ -283,3 +283,88 @@ func (y *YahooFinanceClient) GetMinuteData(symbol string, days int) ([]MinuteBar
 	log.Printf("Successfully fetched total of %d minute bars for %s", len(allBars), symbol)
 	return allBars, nil
 }
+
+// GetDailyHistory fetches daily OHLCV history from Yahoo using interval=1d.
+// rangeStr accepts Yahoo range tokens: 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max.
+// Yahoo returns one candle per trading day going back many years in a single request.
+func (y *YahooFinanceClient) GetDailyHistory(symbol, rangeStr string) ([]DailyBar, error) {
+	log.Printf("Fetching daily history for %s (range=%s)...", symbol, rangeStr)
+
+	url := fmt.Sprintf("https://query1.finance.yahoo.com/v8/finance/chart/%s?interval=1d&range=%s&includePrePost=false",
+		symbol, rangeStr)
+
+	resp, err := y.client.R().Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch daily history: %v", err)
+	}
+	if resp.StatusCode() != 200 {
+		return nil, fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode(), resp.String())
+	}
+
+	var chart YahooChart
+	if err := json.Unmarshal(resp.Body(), &chart); err != nil {
+		return nil, fmt.Errorf("failed to parse daily history response: %v", err)
+	}
+	if chart.Chart.Error != nil {
+		return nil, fmt.Errorf("Yahoo Finance API error: %v", chart.Chart.Error)
+	}
+	if len(chart.Chart.Result) == 0 {
+		return nil, fmt.Errorf("no daily data returned for symbol %s", symbol)
+	}
+
+	result := chart.Chart.Result[0]
+	if len(result.Indicators.Quote) == 0 {
+		return nil, fmt.Errorf("no quote data available")
+	}
+	quote := result.Indicators.Quote[0]
+
+	// Normalize all dates to midnight UTC keyed off the Eastern trading-day,
+	// matching the existing UpdateDailySummary convention so backfilled rows
+	// align with minute-aggregated rows on the same date.
+	etLocation, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load Eastern timezone: %v", err)
+	}
+
+	bars := make([]DailyBar, 0, len(result.Timestamp))
+	for i, ts := range result.Timestamp {
+		if i >= len(quote.Close) || i >= len(quote.Open) || i >= len(quote.High) || i >= len(quote.Low) || i >= len(quote.Volume) {
+			continue
+		}
+		if quote.Close[i] == 0 || quote.Open[i] == 0 || quote.High[i] == 0 || quote.Low[i] == 0 {
+			continue
+		}
+
+		open := quote.Open[i]
+		high := quote.High[i]
+		low := quote.Low[i]
+		closeP := quote.Close[i]
+		volume := quote.Volume[i]
+
+		if open < 1 || open > 10000 || high < 1 || high > 10000 || low < 1 || low > 10000 || closeP < 1 || closeP > 10000 {
+			continue
+		}
+		if high < open || high < closeP || low > open || low > closeP {
+			continue
+		}
+
+		dateStr := time.Unix(ts, 0).In(etLocation).Format("2006-01-02")
+		parsedDate, err := time.Parse("2006-01-02", dateStr)
+		if err != nil {
+			continue
+		}
+
+		bars = append(bars, DailyBar{
+			Symbol: strings.ToUpper(symbol),
+			Date:   parsedDate,
+			Open:   open,
+			High:   high,
+			Low:    low,
+			Close:  closeP,
+			Volume: volume,
+		})
+	}
+
+	log.Printf("Fetched %d daily bars for %s", len(bars), symbol)
+	return bars, nil
+}

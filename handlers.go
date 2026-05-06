@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -142,6 +143,15 @@ func (ws *WebServer) getStockSummary(c *gin.Context) {
 	c.JSON(http.StatusOK, summary)
 }
 
+type dailyBar struct {
+	Timestamp time.Time `json:"timestamp"`
+	Open      float64   `json:"open"`
+	High      float64   `json:"high"`
+	Low       float64   `json:"low"`
+	Close     float64   `json:"close"`
+	Volume    int64     `json:"volume"`
+}
+
 func (ws *WebServer) getStockData(c *gin.Context) {
 	symbol := strings.ToUpper(c.Param("symbol"))
 	days := 30
@@ -152,10 +162,47 @@ func (ws *WebServer) getStockData(c *gin.Context) {
 		}
 	}
 
+	if c.Query("granularity") == "daily" {
+		summaries, err := ws.collector.database.GetDailySummary(symbol, days)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		bars := make([]dailyBar, len(summaries))
+		for i, s := range summaries {
+			bars[len(summaries)-1-i] = dailyBar{
+				Timestamp: s.Date,
+				Open:      s.Open,
+				High:      s.High,
+				Low:       s.Low,
+				Close:     s.Close,
+				Volume:    s.Volume,
+			}
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"symbol": symbol,
+			"days":   days,
+			"count":  len(bars),
+			"data":   bars,
+		})
+		return
+	}
+
 	bars, err := ws.collector.GetDataForAnalysis(symbol, days)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+
+	// Optional aggregation: ?interval=N collapses N consecutive minute bars into
+	// one OHLCV bar. Used by the 5D chart view (interval=15) to keep the payload
+	// and visual density manageable.
+	if intervalStr := c.Query("interval"); intervalStr != "" {
+		if interval, err := strconv.Atoi(intervalStr); err == nil && interval > 1 {
+			bars = aggregateMinuteBars(bars, interval)
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -164,6 +211,68 @@ func (ws *WebServer) getStockData(c *gin.Context) {
 		"count":  len(bars),
 		"data":   bars,
 	})
+}
+
+// aggregateMinuteBars buckets minute-level bars into windowMin-minute candles.
+// The bucket key is floor(timestamp / windowMin) so gaps (overnight, weekends)
+// produce no spurious empty bars.
+func aggregateMinuteBars(bars []MinuteBar, windowMin int) []MinuteBar {
+	if windowMin <= 1 || len(bars) == 0 {
+		return bars
+	}
+	window := time.Duration(windowMin) * time.Minute
+
+	type bucket struct {
+		open, high, low, close float64
+		volume                 int64
+		first, last            time.Time
+	}
+	order := make([]time.Time, 0)
+	buckets := make(map[time.Time]*bucket)
+
+	for _, b := range bars {
+		key := b.Timestamp.Truncate(window)
+		bk, ok := buckets[key]
+		if !ok {
+			bk = &bucket{
+				open: b.Open, high: b.High, low: b.Low, close: b.Close,
+				volume: b.Volume, first: b.Timestamp, last: b.Timestamp,
+			}
+			buckets[key] = bk
+			order = append(order, key)
+			continue
+		}
+		if b.Timestamp.Before(bk.first) {
+			bk.first = b.Timestamp
+			bk.open = b.Open
+		}
+		if b.Timestamp.After(bk.last) {
+			bk.last = b.Timestamp
+			bk.close = b.Close
+		}
+		if b.High > bk.high {
+			bk.high = b.High
+		}
+		if b.Low < bk.low {
+			bk.low = b.Low
+		}
+		bk.volume += b.Volume
+	}
+
+	out := make([]MinuteBar, 0, len(order))
+	for _, key := range order {
+		bk := buckets[key]
+		out = append(out, MinuteBar{
+			Symbol:    bars[0].Symbol,
+			Timestamp: key,
+			Open:      bk.open,
+			High:      bk.high,
+			Low:       bk.low,
+			Close:     bk.close,
+			Volume:    bk.volume,
+		})
+	}
+	return out
 }
 
 func (ws *WebServer) syncStockData(c *gin.Context) {

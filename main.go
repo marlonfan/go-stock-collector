@@ -13,7 +13,8 @@ func main() {
 	symbol := flag.String("symbol", "TSLA", "Stock symbol (default: TSLA)")
 	days := flag.Int("days", 30, "Number of days to fetch (default: 30)")
 	dbPath := flag.String("db", "stock_data.db", "Database file path (default: stock_data.db)")
-	action := flag.String("action", "collect", "Action: collect, analyze, sample")
+	action := flag.String("action", "collect", "Action: collect, analyze, sample, backfill")
+	rangeStr := flag.String("range", "5y", "Yahoo range token for backfill action: 1mo,3mo,6mo,1y,2y,5y,10y,max")
 	port := flag.String("port", "8080", "Web server port (default: 8080)")
 	enableScheduler := flag.Bool("scheduler", true, "Enable scheduled updates at 8:00 AM China time (default: true)")
 	flag.Parse()
@@ -22,7 +23,7 @@ func main() {
 	case "web":
 		runWebMode(*port, *dbPath, *enableScheduler)
 	case "cli":
-		runCLIMode(*symbol, *days, *dbPath, *action)
+		runCLIMode(*symbol, *days, *dbPath, *action, *rangeStr)
 	default:
 		log.Fatalf("Unknown mode: %s. Available modes: web, cli", *mode)
 	}
@@ -51,7 +52,7 @@ func runWebMode(port, dbPath string, enableScheduler bool) {
 	}
 }
 
-func runCLIMode(symbol string, days int, dbPath, action string) {
+func runCLIMode(symbol string, days int, dbPath, action, rangeStr string) {
 	log.Println("=== Stock Data Collector CLI ===")
 	log.Printf("Symbol: %s", symbol)
 	log.Printf("Days: %d", days)
@@ -101,9 +102,18 @@ func runCLIMode(symbol string, days int, dbPath, action string) {
 			log.Fatalf("Failed to display sample data: %v", err)
 		}
 
+	case "backfill":
+		// Backfill daily OHLCV history from Yahoo (interval=1d)
+		start := time.Now()
+		inserted, err := collector.BackfillDailyHistory(symbol, rangeStr)
+		if err != nil {
+			log.Fatalf("Failed to backfill daily history: %v", err)
+		}
+		log.Printf("Backfill completed in %v: %d new daily bars inserted", time.Since(start), inserted)
+
 	default:
 		log.Printf("Unknown action: %s", action)
-		log.Printf("Available actions: collect, analyze, sample")
+		log.Printf("Available actions: collect, analyze, sample, backfill")
 		os.Exit(1)
 	}
 }

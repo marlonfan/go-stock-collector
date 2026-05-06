@@ -355,6 +355,49 @@ func (d *Database) UpdateDailySummary(symbol string, bars []MinuteBar) error {
 	})
 }
 
+// InsertDailySummaryBatch inserts daily candles using INSERT OR IGNORE semantics
+// (existing rows are not overwritten). Backfilled daily history fills gaps in
+// older dates, while UpdateDailySummary keeps owning recent dates that are
+// derived from minute-level data (which is more accurate intraday).
+func (d *Database) InsertDailySummaryBatch(bars []DailyBar) (int, error) {
+	if len(bars) == 0 {
+		return 0, nil
+	}
+
+	inserted := 0
+	err := d.db.Transaction(func(tx *gorm.DB) error {
+		for _, b := range bars {
+			summary := StockDailySummary{
+				Symbol: b.Symbol,
+				Date:   b.Date,
+				Open:   roundToDecimal(b.Open, 2),
+				High:   roundToDecimal(b.High, 2),
+				Low:    roundToDecimal(b.Low, 2),
+				Close:  roundToDecimal(b.Close, 2),
+				Volume: b.Volume,
+			}
+			result := tx.Where("symbol = ? AND date = ?", summary.Symbol, summary.Date).
+				FirstOrCreate(&summary)
+			if result.Error != nil {
+				return fmt.Errorf("failed to insert daily summary for %s/%s: %v",
+					summary.Symbol, summary.Date.Format("2006-01-02"), result.Error)
+			}
+			if result.RowsAffected > 0 {
+				inserted++
+			}
+		}
+		return nil
+	})
+	return inserted, err
+}
+
+// CountDailySummary returns the number of stock_daily_summary rows for a symbol.
+func (d *Database) CountDailySummary(symbol string) (int64, error) {
+	var count int64
+	err := d.db.Model(&StockDailySummary{}).Where("symbol = ?", symbol).Count(&count).Error
+	return count, err
+}
+
 func (d *Database) GetDailySummary(symbol string, days int) ([]DailySummaryAPI, error) {
 	var stockSummaries []StockDailySummary
 	// Calculate the date threshold

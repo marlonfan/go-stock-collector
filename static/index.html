@@ -120,12 +120,15 @@
                 </div>
                 <div class="px-6 py-4">
                     <div class="mb-4 flex items-center space-x-4">
-                        <select id="chartPeriod" class="chart-period-selector">
-                            <option value="5">5 Days</option>
-                            <option value="10">10 Days</option>
-                            <option value="30" selected>30 Days</option>
-                            <option value="60">60 Days</option>
-                        </select>
+                        <div id="chartPeriodGroup" class="chart-period-group" role="tablist">
+                            <button type="button" class="chart-period-btn" data-period="1">1D</button>
+                            <button type="button" class="chart-period-btn" data-period="5">5D</button>
+                            <button type="button" class="chart-period-btn" data-period="30">30D</button>
+                            <button type="button" class="chart-period-btn" data-period="60">60D</button>
+                            <button type="button" class="chart-period-btn active" data-period="90">90D</button>
+                            <button type="button" class="chart-period-btn" data-period="180">180D</button>
+                            <button type="button" class="chart-period-btn" data-period="365">365D</button>
+                        </div>
                         <button id="refreshChart" class="chart-refresh-btn">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
@@ -133,25 +136,30 @@
                             <span>Refresh</span>
                         </button>
                     </div>
-                    <div class="chart-canvas-container p-4">
+                    <div class="chart-canvas-container p-4 relative">
                         <canvas id="candlestickChart" width="800" height="400"></canvas>
+                        <div id="chartTooltip" class="chart-tooltip hidden"></div>
                     </div>
                     <div class="mt-4 chart-stats-grid">
                         <div class="chart-stat-item">
-                            <div class="chart-stat-label">Open</div>
-                            <div class="chart-stat-value" id="chartOpen">-</div>
+                            <div class="chart-stat-label">涨跌幅</div>
+                            <div class="chart-stat-value" id="chartChangePct">-</div>
+                            <div class="chart-stat-sub" id="chartChangeAbs">-</div>
                         </div>
                         <div class="chart-stat-item">
-                            <div class="chart-stat-label">High</div>
-                            <div class="chart-stat-value" id="chartHigh">-</div>
+                            <div class="chart-stat-label">区间最高</div>
+                            <div class="chart-stat-value" id="chartPeriodHigh">-</div>
+                            <div class="chart-stat-sub" id="chartPeriodHighDate">-</div>
                         </div>
                         <div class="chart-stat-item">
-                            <div class="chart-stat-label">Low</div>
-                            <div class="chart-stat-value" id="chartLow">-</div>
+                            <div class="chart-stat-label">区间最低</div>
+                            <div class="chart-stat-value" id="chartPeriodLow">-</div>
+                            <div class="chart-stat-sub" id="chartPeriodLowDate">-</div>
                         </div>
                         <div class="chart-stat-item">
-                            <div class="chart-stat-label">Close</div>
-                            <div class="chart-stat-value" id="chartClose">-</div>
+                            <div class="chart-stat-label">均量</div>
+                            <div class="chart-stat-value" id="chartAvgVolume">-</div>
+                            <div class="chart-stat-sub">per candle</div>
                         </div>
                     </div>
                 </div>

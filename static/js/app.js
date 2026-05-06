@@ -5,7 +5,9 @@ class StockTracker {
         this.chartCache = new Map();
         this.currentChartRequest = null;
         this.currentChartSymbol = null;
+        this.currentChartPeriod = 90;
         this.chartModalClickHandler = null;
+        this.chartPeriodClickHandler = null;
         this.init();
     }
 
@@ -256,6 +258,13 @@ class StockTracker {
 
             const result = await response.json();
             this.showSuccess(`${symbol} data synchronized successfully`);
+
+            // Invalidate cached chart series for this symbol so next open shows fresh daily K
+            for (const key of Array.from(this.chartCache.keys())) {
+                if (key.startsWith(`${symbol}-`)) {
+                    this.chartCache.delete(key);
+                }
+            }
 
             // Reload stock data and refresh view
             await this.loadStockData(symbol);
@@ -806,11 +815,11 @@ class StockTracker {
         this.currentChartSymbol = symbol;
         modal.classList.remove('hidden');
 
+        // Setup event listeners for the modal first so button state is synced
+        this.setupChartModalEventListeners(symbol);
+
         // Load initial chart data
         await this.loadChartData(symbol);
-
-        // Setup event listeners for the modal
-        this.setupChartModalEventListeners(symbol);
     }
 
     hideChartModal() {
@@ -819,25 +828,38 @@ class StockTracker {
         this.abortActiveChartRequest();
         this.setChartControlsDisabled(false);
         this.hideChartLoading();
+        this.hideChartTooltip();
         this.currentChartSymbol = null;
     }
 
     setupChartModalEventListeners(symbol) {
-        const periodSelect = document.getElementById('chartPeriod');
+        const periodGroup = document.getElementById('chartPeriodGroup');
         const refreshBtn = document.getElementById('refreshChart');
 
-        // Remove existing listeners to avoid duplicates
-        periodSelect.replaceWith(periodSelect.cloneNode(true));
+        // Sync active button styling with currentChartPeriod
+        this.syncChartPeriodButtons();
+
+        // Remove existing period click handler if present
+        if (this.chartPeriodClickHandler && periodGroup) {
+            periodGroup.removeEventListener('click', this.chartPeriodClickHandler);
+        }
+
+        if (periodGroup) {
+            this.chartPeriodClickHandler = (e) => {
+                const btn = e.target.closest('.chart-period-btn');
+                if (!btn || btn.disabled) return;
+                const period = parseInt(btn.dataset.period, 10);
+                if (!period || period === this.currentChartPeriod) return;
+                this.currentChartPeriod = period;
+                this.syncChartPeriodButtons();
+                this.loadChartData(symbol, { forceRefresh: true });
+            };
+            periodGroup.addEventListener('click', this.chartPeriodClickHandler);
+        }
+
+        // Replace refresh button to clear stale listeners
         refreshBtn.replaceWith(refreshBtn.cloneNode(true));
-
-        // Re-select the elements after cloning
-        const newPeriodSelect = document.getElementById('chartPeriod');
         const newRefreshBtn = document.getElementById('refreshChart');
-
-        newPeriodSelect.addEventListener('change', () => {
-            this.loadChartData(symbol, { forceRefresh: true });
-        });
-
         newRefreshBtn.addEventListener('click', () => {
             this.loadChartData(symbol, { forceRefresh: true });
         });
@@ -855,6 +877,122 @@ class StockTracker {
         };
 
         modal.addEventListener('click', this.chartModalClickHandler);
+
+        // Bind hover tooltip on the canvas (idempotent via stored handlers).
+        this.setupChartHover();
+    }
+
+    setupChartHover() {
+        const canvas = document.getElementById('candlestickChart');
+        if (!canvas) return;
+
+        if (this.chartMouseMoveHandler) {
+            canvas.removeEventListener('mousemove', this.chartMouseMoveHandler);
+            canvas.removeEventListener('mouseleave', this.chartMouseLeaveHandler);
+        }
+
+        this.chartMouseMoveHandler = (e) => this.handleChartHover(e);
+        this.chartMouseLeaveHandler = () => this.hideChartTooltip();
+
+        canvas.addEventListener('mousemove', this.chartMouseMoveHandler);
+        canvas.addEventListener('mouseleave', this.chartMouseLeaveHandler);
+    }
+
+    handleChartHover(e) {
+        const layout = this._chartLayout;
+        const tooltip = document.getElementById('chartTooltip');
+        if (!layout || !tooltip) return;
+
+        const canvas = document.getElementById('candlestickChart');
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        // Map mouse x to candle index using cached layout.
+        const relX = mouseX - layout.padding.left;
+        const index = Math.floor(relX / layout.candleSpacing);
+
+        // Outside the plot region (margins, x-axis area) → hide.
+        if (
+            index < 0 || index >= layout.data.length ||
+            mouseY < layout.padding.top ||
+            mouseY > layout.padding.top + layout.chartHeight
+        ) {
+            this.hideChartTooltip();
+            return;
+        }
+
+        const item = layout.data[index];
+        this.showChartTooltip(tooltip, item, layout, mouseX, mouseY, rect);
+    }
+
+    showChartTooltip(tooltip, item, layout, mouseX, mouseY, canvasRect) {
+        const isUp = item.close >= item.open;
+        const trendClass = isUp ? 'up' : 'down';
+        const timeLabel = this.formatTooltipTime(item.timestamp, layout.period);
+        const change = item.close - item.open;
+        const changePct = item.open > 0 ? (change / item.open) * 100 : 0;
+        const sign = change >= 0 ? '+' : '';
+
+        tooltip.innerHTML = `
+            <div class="chart-tooltip-time">${timeLabel}</div>
+            <div class="chart-tooltip-row"><span class="chart-tooltip-label">Open</span><span class="chart-tooltip-value">${this.formatPrice(item.open)}</span></div>
+            <div class="chart-tooltip-row"><span class="chart-tooltip-label">High</span><span class="chart-tooltip-value">${this.formatPrice(item.high)}</span></div>
+            <div class="chart-tooltip-row"><span class="chart-tooltip-label">Low</span><span class="chart-tooltip-value">${this.formatPrice(item.low)}</span></div>
+            <div class="chart-tooltip-row"><span class="chart-tooltip-label">Close</span><span class="chart-tooltip-value ${trendClass}">${this.formatPrice(item.close)}</span></div>
+            <div class="chart-tooltip-row"><span class="chart-tooltip-label">Change</span><span class="chart-tooltip-value ${trendClass}">${sign}${change.toFixed(2)} (${sign}${changePct.toFixed(2)}%)</span></div>
+            <div class="chart-tooltip-row"><span class="chart-tooltip-label">Volume</span><span class="chart-tooltip-value">${this.formatVolume(item.volume)}</span></div>
+        `;
+
+        tooltip.classList.remove('hidden');
+
+        // Position relative to .chart-canvas-container (the tooltip's offset parent).
+        // Flip the tooltip to the left of the cursor when it would overflow the right edge.
+        const tooltipWidth = tooltip.offsetWidth;
+        const tooltipHeight = tooltip.offsetHeight;
+        const offset = 14;
+        let left = mouseX + offset;
+        let top = mouseY + offset;
+        if (left + tooltipWidth > canvasRect.width) {
+            left = mouseX - tooltipWidth - offset;
+        }
+        if (top + tooltipHeight > canvasRect.height) {
+            top = canvasRect.height - tooltipHeight - 4;
+        }
+        if (left < 0) left = 4;
+        if (top < 0) top = 4;
+        tooltip.style.left = `${left}px`;
+        tooltip.style.top = `${top}px`;
+    }
+
+    hideChartTooltip() {
+        const tooltip = document.getElementById('chartTooltip');
+        if (tooltip) tooltip.classList.add('hidden');
+    }
+
+    formatTooltipTime(timestamp, period) {
+        const date = new Date(timestamp);
+        const pad = (n) => String(n).padStart(2, '0');
+        if (period <= 5) {
+            // Intraday: full local datetime
+            return `${date.getFullYear()}.${pad(date.getMonth() + 1)}.${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+        }
+        return `${date.getUTCFullYear()}.${pad(date.getUTCMonth() + 1)}.${pad(date.getUTCDate())}`;
+    }
+
+    formatVolume(v) {
+        if (v >= 1e9) return (v / 1e9).toFixed(2) + 'B';
+        if (v >= 1e6) return (v / 1e6).toFixed(2) + 'M';
+        if (v >= 1e3) return (v / 1e3).toFixed(2) + 'K';
+        return String(v);
+    }
+
+    syncChartPeriodButtons() {
+        const buttons = document.querySelectorAll('#chartPeriodGroup .chart-period-btn');
+        buttons.forEach(btn => {
+            const period = parseInt(btn.dataset.period, 10);
+            btn.classList.toggle('active', period === this.currentChartPeriod);
+        });
     }
 
     async loadChartData(symbol, options = {}) {
@@ -862,8 +1000,7 @@ class StockTracker {
         let requestToken = null;
 
         try {
-            const periodSelect = document.getElementById('chartPeriod');
-            const period = parseInt(periodSelect?.value, 10) || 30;
+            const period = this.currentChartPeriod;
             const cacheKey = `${symbol}-${period}`;
             const cachedSeries = this.chartCache.get(cacheKey);
             const shouldShowLoading = forceRefresh || !cachedSeries;
@@ -883,7 +1020,19 @@ class StockTracker {
             this.currentChartRequest = { controller, symbol, cacheKey, requestToken };
             this.setChartControlsDisabled(true);
 
-            const response = await fetch(`/api/stocks/${symbol}/data?days=${period}`, {
+            // Pick granularity by period:
+            //   1D   → raw 1m intraday (~390 candles)
+            //   5D   → 15m aggregated intraday (~130 candles, server-side bucketed)
+            //   ≥30D → daily candles
+            let url;
+            if (period >= 30) {
+                url = `/api/stocks/${symbol}/data?days=${period}&granularity=daily`;
+            } else if (period === 5) {
+                url = `/api/stocks/${symbol}/data?days=${period}&interval=15`;
+            } else {
+                url = `/api/stocks/${symbol}/data?days=${period}`;
+            }
+            const response = await fetch(url, {
                 signal: controller.signal,
             });
             if (!response.ok) {
@@ -930,20 +1079,33 @@ class StockTracker {
         const canvas = document.getElementById('candlestickChart');
         const ctx = canvas.getContext('2d');
 
-        // Set canvas size for better resolution
+        // Logical canvas height. Bumped from 400→440 to give the rotated date
+        // labels at the bottom enough room — at 400 they were getting clipped
+        // off the bottom edge.
+        const canvasHeight = 440;
+
+        // Force fill the parent. Without this, the canvas's `width="800"` HTML
+        // attribute leaves it at 800 CSS-px wide inside a wider modal, with a
+        // big gray strip on the right. CSS now declares width: 100%, but the
+        // assignment here is defensive in case styles are reordered.
+        canvas.style.width = '100%';
+        canvas.style.height = `${canvasHeight}px`;
+
         const rect = canvas.getBoundingClientRect();
         canvas.width = rect.width * window.devicePixelRatio;
-        canvas.height = 400 * window.devicePixelRatio;
+        canvas.height = canvasHeight * window.devicePixelRatio;
         ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
 
-        // Clear canvas
-        ctx.clearRect(0, 0, rect.width, 400);
+        ctx.clearRect(0, 0, rect.width, canvasHeight);
 
-        if (data.length === 0) return;
+        if (data.length === 0) {
+            this._chartLayout = null;
+            return;
+        }
 
-        const padding = { top: 20, right: 60, bottom: 40, left: 10 };
+        const padding = { top: 20, right: 72, bottom: 64, left: 10 };
         const chartWidth = rect.width - padding.left - padding.right;
-        const chartHeight = 400 - padding.top - padding.bottom;
+        const chartHeight = canvasHeight - padding.top - padding.bottom;
 
         // Calculate price range
         let minPrice = Infinity, maxPrice = -Infinity;
@@ -976,12 +1138,14 @@ class StockTracker {
             ctx.lineTo(padding.left + chartWidth, y);
             ctx.stroke();
 
-            // Price labels
+            // Price labels — left-aligned in the right margin so candles never
+            // overlap them (previously textAlign='right' made labels extend
+            // ~50px LEFT into the chart area, where the last candles sat on top).
             const price = maxPrice - ((maxPrice - minPrice) / 5) * i;
             ctx.fillStyle = isDarkMode ? '#9ca3af' : '#6b7280';
             ctx.font = '11px sans-serif';
-            ctx.textAlign = 'right';
-            ctx.fillText(this.formatPrice(price), padding.left + chartWidth + 5, y + 4);
+            ctx.textAlign = 'left';
+            ctx.fillText(this.formatPrice(price), padding.left + chartWidth + 6, y + 4);
         }
 
         ctx.setLineDash([]);
@@ -1019,16 +1183,19 @@ class StockTracker {
                 ctx.fillRect(x - candleWidth / 2, bodyTop, candleWidth, Math.max(1, bodyHeight));
             }
 
-            // Draw date labels for every nth candle (avoid overcrowding)
-            const labelInterval = Math.ceil(50 / candleSpacing);
-            if (index % labelInterval === 0 || index === data.length - 1) {
+            // Draw date labels at a regular interval. We deliberately do NOT
+            // force-label the very last candle — that used to crowd it right
+            // up against the second-to-last regular label. Instead the last
+                // few candles' info is reachable via the hover tooltip.
+            const labelInterval = Math.max(1, Math.ceil(60 / candleSpacing));
+            if (index % labelInterval === 0) {
                 ctx.save();
                 ctx.translate(x, padding.top + chartHeight + 15);
                 ctx.rotate(-Math.PI / 4);
                 ctx.fillStyle = isDarkMode ? '#9ca3af' : '#6b7280';
                 ctx.font = '10px sans-serif';
                 ctx.textAlign = 'right';
-                ctx.fillText(this.formatChartDate(item.timestamp), 0, 0);
+                ctx.fillText(this.formatChartDate(item.timestamp, this.currentChartPeriod), 0, 0);
                 ctx.restore();
             }
         });
@@ -1037,19 +1204,78 @@ class StockTracker {
         ctx.fillStyle = isDarkMode ? '#f3f4f6' : '#111827';
         ctx.font = 'bold 14px sans-serif';
         ctx.textAlign = 'left';
-        ctx.fillText(`${symbol} - ${document.getElementById('chartPeriod').value} Days`, padding.left, padding.top - 5);
+        ctx.fillText(`${symbol} - ${this.currentChartPeriod}D`, padding.left, padding.top - 5);
+
+        // Cache layout for the hover tooltip: maps mouse x → candle index.
+        this._chartLayout = {
+            data,
+            symbol,
+            period: this.currentChartPeriod,
+            padding,
+            chartWidth,
+            chartHeight,
+            candleSpacing,
+            canvasHeight,
+        };
     }
 
     updateChartStats(data) {
-        if (data.length === 0) return;
+        if (!data || data.length === 0) {
+            this.resetChartStats();
+            return;
+        }
 
-        const latest = data[data.length - 1];
-        const oldest = data[0];
+        const first = data[0];
+        const last = data[data.length - 1];
 
-        document.getElementById('chartOpen').textContent = this.formatPrice(oldest.open);
-        document.getElementById('chartHigh').textContent = this.formatPrice(Math.max(...data.map(d => d.high)));
-        document.getElementById('chartLow').textContent = this.formatPrice(Math.min(...data.map(d => d.low)));
-        document.getElementById('chartClose').textContent = this.formatPrice(latest.close);
+        // Period change: first candle's open → last candle's close
+        const change = last.close - first.open;
+        const changePct = first.open > 0 ? (change / first.open) * 100 : 0;
+        const isUp = change >= 0;
+        const sign = isUp ? '+' : '';
+        const trendClass = isUp ? 'chart-stat-up' : 'chart-stat-down';
+
+        // Single pass for high / low / total volume
+        let highBar = first;
+        let lowBar = first;
+        let totalVolume = 0;
+        for (const d of data) {
+            if (d.high > highBar.high) highBar = d;
+            if (d.low < lowBar.low) lowBar = d;
+            totalVolume += d.volume;
+        }
+        const avgVolume = totalVolume / data.length;
+
+        const setStat = (id, text, cls) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.textContent = text;
+            el.classList.remove('chart-stat-up', 'chart-stat-down');
+            if (cls) el.classList.add(cls);
+        };
+
+        setStat('chartChangePct', `${sign}${changePct.toFixed(2)}%`, trendClass);
+        setStat('chartChangeAbs', `${sign}${this.formatPrice(change)}`, trendClass);
+        setStat('chartPeriodHigh', this.formatPrice(highBar.high));
+        setStat('chartPeriodHighDate', this.formatChartDate(highBar.timestamp, this.currentChartPeriod));
+        setStat('chartPeriodLow', this.formatPrice(lowBar.low));
+        setStat('chartPeriodLowDate', this.formatChartDate(lowBar.timestamp, this.currentChartPeriod));
+        setStat('chartAvgVolume', this.formatVolume(avgVolume));
+    }
+
+    resetChartStats() {
+        const ids = [
+            'chartChangePct', 'chartChangeAbs',
+            'chartPeriodHigh', 'chartPeriodHighDate',
+            'chartPeriodLow', 'chartPeriodLowDate',
+            'chartAvgVolume',
+        ];
+        ids.forEach(id => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.textContent = '-';
+            el.classList.remove('chart-stat-up', 'chart-stat-down');
+        });
     }
 
     showNoChartData() {
@@ -1064,10 +1290,7 @@ class StockTracker {
         ctx.textAlign = 'center';
         ctx.fillText('No chart data available', rect.width / 2, 200);
 
-        // Reset stats
-        ['chartOpen', 'chartHigh', 'chartLow', 'chartClose'].forEach(id => {
-            document.getElementById(id).textContent = '-';
-        });
+        this.resetChartStats();
     }
 
     showChartError(message) {
@@ -1115,17 +1338,17 @@ class StockTracker {
     }
 
     setChartControlsDisabled(disabled) {
-        const periodSelect = document.getElementById('chartPeriod');
+        const periodButtons = document.querySelectorAll('#chartPeriodGroup .chart-period-btn');
         const refreshBtn = document.getElementById('refreshChart');
 
-        [periodSelect, refreshBtn].forEach((el) => {
-            if (el) {
-                el.disabled = disabled;
-                el.classList.toggle('opacity-50', disabled);
-            }
+        periodButtons.forEach((el) => {
+            el.disabled = disabled;
+            el.classList.toggle('opacity-50', disabled);
         });
 
         if (refreshBtn) {
+            refreshBtn.disabled = disabled;
+            refreshBtn.classList.toggle('opacity-50', disabled);
             refreshBtn.setAttribute('aria-busy', disabled);
         }
     }
@@ -1137,9 +1360,22 @@ class StockTracker {
         this.currentChartRequest = null;
     }
 
-    formatChartDate(timestamp) {
+    formatChartDate(timestamp, period) {
         const date = new Date(timestamp);
-        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const pad = (n) => String(n).padStart(2, '0');
+
+        // 1D: time only (HH:mm) in local time — all candles same day
+        if (period <= 1) {
+            return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+        }
+        // 5D: short intraday — MM.DD HH:mm in local time
+        if (period <= 5) {
+            return `${pad(date.getMonth() + 1)}.${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+        }
+        // Daily candles: stored as midnight UTC of the ET trading day, so read
+        // UTC components — otherwise China-local rendering shifts every label
+        // back by one day.
+        return `${date.getUTCFullYear()}.${pad(date.getUTCMonth() + 1)}.${pad(date.getUTCDate())}`;
     }
 
     // Pinning functionality methods
