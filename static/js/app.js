@@ -148,11 +148,19 @@ class StockTracker {
             // Hide overlay, swap to app, fetch watchlist
             document.getElementById('authOverlay').classList.add('hidden');
             this.applyAuthSuccess(data);
-            await this._migrateLegacyPinsIfAny();
+            const importedCount = await this._importLegacyLocalStocks();
             if (kind === 'register' && data.claimedStocks > 0) {
                 this.showSuccess(`已继承 ${data.claimedStocks} 只股票`);
             }
+            if (importedCount > 0) {
+                this.showSuccess(`从本地导入 ${importedCount} 只股票,正在同步…`);
+            }
             await this.loadWatchedStocks();
+            // Kick off real data sync for the freshly-imported stocks; renderStocks
+            // will re-fire as each completes.
+            if (importedCount > 0) {
+                this.syncAllStocks();
+            }
         } catch (e) {
             this.setAuthError('网络错误,请重试');
         }
@@ -194,28 +202,54 @@ class StockTracker {
         await this.showAuthOverlay();
     }
 
-    // Migrate localStorage pinnedStocks → server pin column on first login,
-    // then drop the localStorage key. Idempotent and per-device.
-    async _migrateLegacyPinsIfAny() {
+    // Pre-auth, the watchlist actually lived in the server but pin state was
+    // localStorage-only. Users who lost their server-side stocks (e.g. after
+    // first-user inheritance migrated them to the original account) still
+    // have the symbol list in localStorage.pinnedStocks. Treat that list as
+    // a starter watchlist for the new account: add each as a watched stock
+    // (POST /api/stocks), pin it, then clear the legacy key. Returns count
+    // of stocks successfully added so the caller can decide whether to
+    // trigger a sync afterwards. Idempotent and per-browser.
+    async _importLegacyLocalStocks() {
         let legacy = null;
-        try { legacy = localStorage.getItem('pinnedStocks'); } catch (e) { return; }
-        if (!legacy) return;
+        try { legacy = localStorage.getItem('pinnedStocks'); } catch (e) { return 0; }
+        if (!legacy) return 0;
         let symbols;
         try { symbols = JSON.parse(legacy); } catch (e) { symbols = null; }
         if (!Array.isArray(symbols) || symbols.length === 0) {
             try { localStorage.removeItem('pinnedStocks'); } catch (e) {}
-            return;
+            return 0;
         }
-        // Best-effort: try each symbol; ignore errors (e.g. not in user's watchlist)
-        await Promise.all(symbols.map(s =>
-            fetch(`/api/stocks/${encodeURIComponent(s)}/pin`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'same-origin',
-                body: JSON.stringify({ pinned: true }),
-            }).catch(() => null)
-        ));
+
+        let imported = 0;
+        // Sequential to keep order and avoid hammering auth-protected endpoints.
+        // Each request is fast (<100ms server-side) so total cost ≈ 0.1s × N.
+        for (const sym of symbols) {
+            const symStr = String(sym || '').toUpperCase().trim();
+            if (!symStr) continue;
+            try {
+                const addResp = await fetch('/api/stocks', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ symbol: symStr }),
+                });
+                // Backend's AddWatchedStock uses FirstOrCreate per (user_id, symbol),
+                // so re-adding an existing symbol returns 200 too. Either way count.
+                if (addResp.ok) {
+                    imported++;
+                    // Best-effort pin (don't block import on failure)
+                    fetch(`/api/stocks/${encodeURIComponent(symStr)}/pin`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({ pinned: true }),
+                    }).catch(() => null);
+                }
+            } catch (e) { /* ignore per-symbol failures */ }
+        }
         try { localStorage.removeItem('pinnedStocks'); } catch (e) {}
+        return imported;
     }
 
     // Centralized fetch wrapper: any 401 from the API while logged in
