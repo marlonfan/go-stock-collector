@@ -118,6 +118,19 @@ func (sc *StockCollector) CollectHistoricalData(symbol string, days int) error {
 		}
 	}
 
+	// Refresh the last month of daily OHLCV from Yahoo's canonical interval=1d
+	// API and overwrite whatever minute-aggregation produced. Minute bars can
+	// be sparse (filtered zero-volume pre/post-market, validation rejections),
+	// causing the aggregated high/low to underrepresent the day. This step
+	// ensures recent days carry the official end-of-day numbers.
+	if recent, err := sc.yahooClient.GetDailyHistory(symbol, "1mo"); err != nil {
+		log.Printf("Warning: recent daily refresh failed for %s: %v", symbol, err)
+	} else if len(recent) > 0 {
+		if _, dbErr := sc.database.UpsertDailySummaryBatch(recent); dbErr != nil {
+			log.Printf("Warning: persisting recent daily failed for %s: %v", symbol, dbErr)
+		}
+	}
+
 	// Refresh marketCap / P/E from Yahoo quoteSummary. Best-effort: a failure
 	// here doesn't fail the whole sync, since price data already landed above.
 	if fundamentals, err := sc.yahooClient.GetQuoteSummary(symbol); err != nil {

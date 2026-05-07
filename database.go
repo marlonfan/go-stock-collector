@@ -442,10 +442,51 @@ func (d *Database) UpdateDailySummary(symbol string, bars []MinuteBar) error {
 	})
 }
 
+// UpsertDailySummaryBatch inserts daily candles, overwriting any existing rows
+// for the same (symbol, date). Used to refresh recent days with Yahoo's
+// canonical daily OHLCV after sync — minute aggregation occasionally
+// underreports intraday highs/lows when some minute bars are filtered out
+// (zero-volume pre/post-market, validation rejections), so the official daily
+// API is the source of truth for end-of-day numbers.
+func (d *Database) UpsertDailySummaryBatch(bars []DailyBar) (int, error) {
+	if len(bars) == 0 {
+		return 0, nil
+	}
+	updated := 0
+	err := d.db.Transaction(func(tx *gorm.DB) error {
+		for _, b := range bars {
+			summary := StockDailySummary{
+				Symbol: b.Symbol,
+				Date:   b.Date,
+				Open:   roundToDecimal(b.Open, 2),
+				High:   roundToDecimal(b.High, 2),
+				Low:    roundToDecimal(b.Low, 2),
+				Close:  roundToDecimal(b.Close, 2),
+				Volume: b.Volume,
+			}
+			result := tx.Where("symbol = ? AND date = ?", summary.Symbol, summary.Date).
+				Assign(map[string]interface{}{
+					"open":   summary.Open,
+					"high":   summary.High,
+					"low":    summary.Low,
+					"close":  summary.Close,
+					"volume": summary.Volume,
+				}).
+				FirstOrCreate(&summary)
+			if result.Error != nil {
+				return fmt.Errorf("failed to upsert daily summary for %s/%s: %v",
+					summary.Symbol, summary.Date.Format("2006-01-02"), result.Error)
+			}
+			updated++
+		}
+		return nil
+	})
+	return updated, err
+}
+
 // InsertDailySummaryBatch inserts daily candles using INSERT OR IGNORE semantics
-// (existing rows are not overwritten). Backfilled daily history fills gaps in
-// older dates, while UpdateDailySummary keeps owning recent dates that are
-// derived from minute-level data (which is more accurate intraday).
+// (existing rows are not overwritten). Used by the 5y backfill to fill historical
+// gaps without disturbing more authoritative recent data.
 func (d *Database) InsertDailySummaryBatch(bars []DailyBar) (int, error) {
 	if len(bars) == 0 {
 		return 0, nil
