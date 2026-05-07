@@ -1840,8 +1840,11 @@ class StockTracker {
         }
         ctx.setLineDash([]);
 
-        // X-axis date labels (every Nth bar so they don't overlap)
-        const labelInterval = Math.max(1, Math.ceil((data.length * 50) / chartWidth));
+        // X-axis date labels — minimum 70px between labels so YYYY.MM.DD
+        // (about 56px wide at 10px) doesn't overlap. Daily formats are wider
+        // than intraday HH:mm, so we err on the side of fewer labels.
+        const minLabelGapPx = this.currentChartPeriod >= 30 ? 80 : 60;
+        const labelInterval = Math.max(1, Math.ceil(minLabelGapPx / stepX));
         ctx.fillStyle = isDark ? '#94a3b8' : '#9ca3af';
         ctx.font = '10px -apple-system, sans-serif';
         ctx.textAlign = 'center';
@@ -1919,17 +1922,33 @@ class StockTracker {
         const rect = canvas.getBoundingClientRect();
         const mouseX = e.clientX - rect.left;
         const mouseY = e.clientY - rect.top;
-        const relX = mouseX - layout.padding.left;
-        const index = Math.floor(relX / layout.stepX);
+
+        // Hide entirely if pointer is outside the canvas's horizontal range
+        // (e.g. dragged into the right margin where price labels live).
+        if (mouseX < layout.padding.left || mouseX > layout.padding.left + layout.chartWidth) {
+            return;
+        }
+
+        // Crosshair always tracks the finger's actual x — not the snapped
+        // candle center — so it feels smooth instead of jumping between
+        // candles every few pixels.
+        const wrapRect = canvas.parentElement.getBoundingClientRect();
+        crosshair.style.left = `${mouseX}px`;
+        crosshair.style.height = `${wrapRect.height - 56}px`;
+        crosshair.classList.remove('hidden');
+
+        // If finger drifts vertically off the plot area but stays within the
+        // canvas, keep the crosshair on screen at its new x but don't
+        // re-update the tooltip — keeps last-touched candle's data visible.
         if (
-            index < 0 || index >= layout.data.length ||
             mouseY < layout.padding.top ||
             mouseY > layout.padding.top + layout.chartHeight
         ) {
-            // Outside plot area — don't update, but keep last-shown state so
-            // the user can lift their finger off the chart to read.
             return;
         }
+
+        const relX = mouseX - layout.padding.left;
+        const index = Math.max(0, Math.min(layout.data.length - 1, Math.floor(relX / layout.stepX)));
         const bar = layout.data[index];
         const isUp = bar.close >= bar.open;
         const trend = isUp ? 'up' : 'down';
@@ -1937,27 +1956,23 @@ class StockTracker {
         const pct = bar.open > 0 ? (change / bar.open) * 100 : 0;
         const sign = change >= 0 ? '+' : '';
 
-        // Compact horizontal strip — same height regardless of selected
-        // candle so the chart geometry stays stable.
+        // Two-row layout fits all 7 fields without horizontal scroll on
+        // typical phone widths. Row 1: time + close + Δ%; Row 2: O/H/L/V.
         strip.innerHTML = `
-            <span class="ts-time">${this.formatTooltipTime(bar.timestamp, this.currentChartPeriod)}</span>
-            <span class="ts-pair"><span class="ts-label">O</span><span class="ts-value">${this.formatPrice(bar.open)}</span></span>
-            <span class="ts-pair"><span class="ts-label">H</span><span class="ts-value up">${this.formatPrice(bar.high)}</span></span>
-            <span class="ts-pair"><span class="ts-label">L</span><span class="ts-value down">${this.formatPrice(bar.low)}</span></span>
-            <span class="ts-pair"><span class="ts-label">C</span><span class="ts-value ${trend}">${this.formatPrice(bar.close)}</span></span>
-            <span class="ts-pair"><span class="ts-label">Δ</span><span class="ts-value ${trend}">${sign}${pct.toFixed(2)}%</span></span>
-            <span class="ts-pair"><span class="ts-label">V</span><span class="ts-value">${this.formatVolume(bar.volume)}</span></span>
+            <div class="ts-line">
+                <span class="ts-time">${this.formatTooltipTime(bar.timestamp, this.currentChartPeriod)}</span>
+                <span class="ts-spacer"></span>
+                <span class="ts-pair"><span class="ts-label">C</span><span class="ts-value ${trend}">${this.formatPrice(bar.close)}</span></span>
+                <span class="ts-pair"><span class="ts-value ${trend}">${sign}${pct.toFixed(2)}%</span></span>
+            </div>
+            <div class="ts-line">
+                <span class="ts-pair"><span class="ts-label">O</span><span class="ts-value">${this.formatPrice(bar.open)}</span></span>
+                <span class="ts-pair"><span class="ts-label">H</span><span class="ts-value up">${this.formatPrice(bar.high)}</span></span>
+                <span class="ts-pair"><span class="ts-label">L</span><span class="ts-value down">${this.formatPrice(bar.low)}</span></span>
+                <span class="ts-pair"><span class="ts-label">V</span><span class="ts-value">${this.formatVolume(bar.volume)}</span></span>
+            </div>
         `;
         strip.classList.remove('hidden');
-
-        // Crosshair: 1px vertical line at the candle's center, full chart height.
-        // The strip is 28px + 4px margin = 32px tall and reserved by md-chart-wrap
-        // padding-top. Crosshair starts there and extends to the chart bottom.
-        const candleX = layout.padding.left + layout.stepX * index + layout.stepX / 2;
-        const wrapRect = canvas.parentElement.getBoundingClientRect();
-        crosshair.style.left = `${candleX}px`;
-        crosshair.style.height = `${wrapRect.height - 32}px`;
-        crosshair.classList.remove('hidden');
     }
 
     _mdHideTooltip() {

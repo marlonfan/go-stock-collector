@@ -2262,56 +2262,86 @@ tr.pinned-row:hover {
 
 .md-chart-wrap {
   position: relative;
-  /* Reserve space for the tooltip strip so the chart doesn't shift up/down
-     when the strip toggles visibility. */
-  padding-top: 32px;
+  /* Reserve 56px for the 2-line tooltip strip so the chart doesn't shift
+     up/down when the strip toggles visibility. */
+  padding-top: 56px;
 }
-.md-chart-wrap canvas { display: block; width: 100%; }
+.md-chart-wrap canvas {
+  display: block;
+  width: 100%;
+  /* Disable browser default touch behavior (scrolling/pinch-zoom) so
+     pointermove tracks the finger smoothly without the page hijacking
+     the gesture. */
+  touch-action: none;
+}
 
 /* Tooltip strip pinned to top of chart card — always sits above the
-   candles instead of floating near the user's finger. Hidden until a
-   candle is touched. */
+   candles instead of floating near the user's finger. Two-row layout
+   keeps every field visible without horizontal scroll. */
 .md-tooltip-strip {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
-  height: 28px;
-  padding: 0 8px;
+  padding: 6px 10px;
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  gap: 2px;
   font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
   font-variant-numeric: tabular-nums;
   font-size: 11px;
-  background: rgba(15, 23, 42, 0.96);
-  color: #f1f5f9;
+  background: rgba(255, 255, 255, 0.97);
+  color: #0f172a;
+  border: 1px solid #e5e7eb;
   border-radius: 8px;
-  white-space: nowrap;
-  overflow-x: auto;
-  scrollbar-width: none;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
   z-index: 5;
   pointer-events: none;
 }
-.md-tooltip-strip::-webkit-scrollbar { display: none; }
+.dark .md-tooltip-strip {
+  background: rgba(15, 23, 42, 0.96);
+  color: #f1f5f9;
+  border-color: #334155;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
 .md-tooltip-strip.hidden { display: none; }
-.md-tooltip-strip .ts-time { font-weight: 600; flex-shrink: 0; }
-.md-tooltip-strip .ts-pair { display: inline-flex; gap: 4px; flex-shrink: 0; }
-.md-tooltip-strip .ts-label { color: #94a3b8; font-weight: 500; }
-.md-tooltip-strip .ts-value.up { color: #34d399; }
-.md-tooltip-strip .ts-value.down { color: #f87171; }
+.md-tooltip-strip .ts-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+}
+.md-tooltip-strip .ts-time {
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.md-tooltip-strip .ts-spacer { flex: 1; }
+.md-tooltip-strip .ts-pair {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  flex-shrink: 0;
+}
+.md-tooltip-strip .ts-label {
+  color: #94a3b8;
+  font-weight: 500;
+  font-size: 10px;
+}
+.dark .md-tooltip-strip .ts-label { color: #64748b; }
+.md-tooltip-strip .ts-value.up { color: var(--color-up); font-weight: 600; }
+.md-tooltip-strip .ts-value.down { color: var(--color-down); font-weight: 600; }
 
-/* 1px vertical crosshair at the touched x position. Pure DOM so no
-   canvas redraw needed on every pointermove. */
+/* 1px vertical crosshair — follows the finger smoothly (left = pointer x,
+   not snapped to candle center). Pure DOM, no canvas redraw needed. */
 .md-crosshair {
   position: absolute;
-  top: 32px; /* line up with chart area below the tooltip strip */
+  top: 56px; /* line up with chart area below the tooltip strip */
   width: 1px;
-  background: rgba(15, 23, 42, 0.4);
+  background: rgba(15, 23, 42, 0.5);
   pointer-events: none;
   z-index: 4;
 }
-.dark .md-crosshair { background: rgba(241, 245, 249, 0.45); }
+.dark .md-crosshair { background: rgba(241, 245, 249, 0.55); }
 .md-crosshair.hidden { display: none; }
 
 .md-ohlc-grid {
