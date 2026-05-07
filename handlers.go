@@ -135,14 +135,36 @@ func (ws *WebServer) getStockSummary(c *gin.Context) {
 		return
 	}
 
-	// Authoritative current price comes from the most recent daily summary —
-	// it's refreshed every sync via Yahoo's 1d API, which returns live price
-	// during market hours and the official close after. Reading the latest
-	// minute close instead can show stale data if the user synced earlier in
-	// the day and the price moved after, leading to wrong-sign change values.
+	// Card / list display the most recent FULLY-COMPLETED trading day, not
+	// today's intraday partial value. Reasoning: during market hours and
+	// pre-market, dailyData[0] for "today" reflects whatever Yahoo's 1d API
+	// returns mid-session — usually barely different from yesterday's close
+	// even if yesterday saw a clear move. Showing yesterday's close gives a
+	// more meaningful "current state" until the day is genuinely closed.
+	//
+	// Detection: if dailyData[0]'s date matches today in US Eastern time AND
+	// we're before 17:00 ET (1 hour buffer past the 16:00 close, covers any
+	// after-hours print updates), treat it as in-progress and shift to
+	// dailyData[1] vs dailyData[2]. Otherwise (weekend, after-hours, or
+	// markets-already-closed), use dailyData[0] vs dailyData[1] normally.
+	displayIdx := 0
+	prevIdx := 1
+	if len(dailyData) >= 3 {
+		etLoc, errLoc := time.LoadLocation("America/New_York")
+		if errLoc == nil {
+			nowET := time.Now().In(etLoc)
+			todayET := nowET.Format("2006-01-02")
+			firstDate := dailyData[0].Date.Format("2006-01-02")
+			if firstDate == todayET && nowET.Hour() < 17 {
+				displayIdx = 1
+				prevIdx = 2
+			}
+		}
+	}
+
 	var currentPrice float64
-	if len(dailyData) > 0 {
-		currentPrice = dailyData[0].Close
+	if len(dailyData) > displayIdx {
+		currentPrice = dailyData[displayIdx].Close
 	}
 
 	// Last-update timestamp comes from minute data when available (more
@@ -166,13 +188,11 @@ func (ws *WebServer) getStockSummary(c *gin.Context) {
 		return
 	}
 
-	// Calculate change vs previous trading day's close. Both currentPrice and
-	// previousClose now come from the same daily-summary source so they
-	// can't disagree about which day is "today".
+	// Calculate change vs the trading day before our display row.
 	var change float64
 	var changePercent float64
-	if len(dailyData) > 1 {
-		previousClose := dailyData[1].Close
+	if len(dailyData) > prevIdx {
+		previousClose := dailyData[prevIdx].Close
 		change = currentPrice - previousClose
 		if previousClose > 0 {
 			changePercent = (change / previousClose) * 100

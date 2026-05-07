@@ -54,6 +54,29 @@ func (d *Database) createAdditionalIndexes() error {
 		return fmt.Errorf("failed to create watched_stocks composite unique index: %v", err)
 	}
 
+	// Dedupe stock_daily_summary: older code paths could write a (symbol, date)
+	// row twice if the time.Time values serialized to different strings (e.g.
+	// midnight UTC vs midnight ET). Keep the highest-id row per (symbol, day)
+	// — that's the most recent write, which is the authoritative Yahoo daily
+	// API value from UpsertDailySummaryBatch.
+	if err := d.db.Exec(`
+		DELETE FROM stock_daily_summary
+		WHERE id NOT IN (
+			SELECT MAX(id) FROM stock_daily_summary
+			GROUP BY symbol, date(date)
+		)
+	`).Error; err != nil {
+		return fmt.Errorf("failed to dedupe daily summaries: %v", err)
+	}
+	// Forward prevention. date(date) extracts the YYYY-MM-DD part so different
+	// timestamp formats for the same trading day collide on the unique index.
+	if err := d.db.Exec(`
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_summary_symbol_day_unique
+		ON stock_daily_summary(symbol, date(date))
+	`).Error; err != nil {
+		return fmt.Errorf("failed to create daily summary unique index: %v", err)
+	}
+
 	return nil
 }
 
