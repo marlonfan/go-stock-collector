@@ -288,9 +288,10 @@
             <button type="button" class="md-period-tab" data-md-period="365">1Y</button>
         </div>
         <div class="md-card">
-            <div class="md-chart-wrap" style="position:relative;">
+            <div class="md-chart-wrap">
+                <div id="mdTooltipStrip" class="md-tooltip-strip hidden"></div>
                 <canvas id="mdChart"></canvas>
-                <div id="mdTooltip" class="chart-tooltip hidden"></div>
+                <div id="mdCrosshair" class="md-crosshair hidden"></div>
             </div>
         </div>
         <div class="md-card">

@@ -1893,12 +1893,18 @@ class StockTracker {
         const canvas = document.getElementById('mdChart');
         if (!canvas) return;
         if (this._mdHoverHandler) {
+            canvas.removeEventListener('pointerdown', this._mdHoverHandler);
             canvas.removeEventListener('pointermove', this._mdHoverHandler);
             canvas.removeEventListener('pointerleave', this._mdLeaveHandler);
             canvas.removeEventListener('pointercancel', this._mdLeaveHandler);
         }
         this._mdHoverHandler = (e) => this._mdShowTooltipAt(e);
-        this._mdLeaveHandler = () => this._mdHideTooltip();
+        // Mouse leaves the chart (desktop hover) → hide. Touch ends but
+        // finger is still on canvas → keep visible (user is reading).
+        this._mdLeaveHandler = (e) => {
+            if (!e || e.pointerType === 'mouse') this._mdHideTooltip();
+        };
+        canvas.addEventListener('pointerdown', this._mdHoverHandler);
         canvas.addEventListener('pointermove', this._mdHoverHandler);
         canvas.addEventListener('pointerleave', this._mdLeaveHandler);
         canvas.addEventListener('pointercancel', this._mdLeaveHandler);
@@ -1907,8 +1913,9 @@ class StockTracker {
     _mdShowTooltipAt(e) {
         const layout = this._mdLayout;
         const canvas = document.getElementById('mdChart');
-        const tooltip = document.getElementById('mdTooltip');
-        if (!layout || !canvas || !tooltip) return;
+        const strip = document.getElementById('mdTooltipStrip');
+        const crosshair = document.getElementById('mdCrosshair');
+        if (!layout || !canvas || !strip || !crosshair) return;
         const rect = canvas.getBoundingClientRect();
         const mouseX = e.clientX - rect.left;
         const mouseY = e.clientY - rect.top;
@@ -1919,7 +1926,8 @@ class StockTracker {
             mouseY < layout.padding.top ||
             mouseY > layout.padding.top + layout.chartHeight
         ) {
-            this._mdHideTooltip();
+            // Outside plot area — don't update, but keep last-shown state so
+            // the user can lift their finger off the chart to read.
             return;
         }
         const bar = layout.data[index];
@@ -1929,35 +1937,34 @@ class StockTracker {
         const pct = bar.open > 0 ? (change / bar.open) * 100 : 0;
         const sign = change >= 0 ? '+' : '';
 
-        tooltip.innerHTML = `
-            <div class="chart-tooltip-time">${this.formatTooltipTime(bar.timestamp, this.currentChartPeriod)}</div>
-            <div class="chart-tooltip-row"><span class="chart-tooltip-label">Open</span><span class="chart-tooltip-value">${this.formatPrice(bar.open)}</span></div>
-            <div class="chart-tooltip-row"><span class="chart-tooltip-label">High</span><span class="chart-tooltip-value">${this.formatPrice(bar.high)}</span></div>
-            <div class="chart-tooltip-row"><span class="chart-tooltip-label">Low</span><span class="chart-tooltip-value">${this.formatPrice(bar.low)}</span></div>
-            <div class="chart-tooltip-row"><span class="chart-tooltip-label">Close</span><span class="chart-tooltip-value ${trend}">${this.formatPrice(bar.close)}</span></div>
-            <div class="chart-tooltip-row"><span class="chart-tooltip-label">Chg</span><span class="chart-tooltip-value ${trend}">${sign}${change.toFixed(2)} (${sign}${pct.toFixed(2)}%)</span></div>
-            <div class="chart-tooltip-row"><span class="chart-tooltip-label">Vol</span><span class="chart-tooltip-value">${this.formatVolume(bar.volume)}</span></div>
+        // Compact horizontal strip — same height regardless of selected
+        // candle so the chart geometry stays stable.
+        strip.innerHTML = `
+            <span class="ts-time">${this.formatTooltipTime(bar.timestamp, this.currentChartPeriod)}</span>
+            <span class="ts-pair"><span class="ts-label">O</span><span class="ts-value">${this.formatPrice(bar.open)}</span></span>
+            <span class="ts-pair"><span class="ts-label">H</span><span class="ts-value up">${this.formatPrice(bar.high)}</span></span>
+            <span class="ts-pair"><span class="ts-label">L</span><span class="ts-value down">${this.formatPrice(bar.low)}</span></span>
+            <span class="ts-pair"><span class="ts-label">C</span><span class="ts-value ${trend}">${this.formatPrice(bar.close)}</span></span>
+            <span class="ts-pair"><span class="ts-label">Δ</span><span class="ts-value ${trend}">${sign}${pct.toFixed(2)}%</span></span>
+            <span class="ts-pair"><span class="ts-label">V</span><span class="ts-value">${this.formatVolume(bar.volume)}</span></span>
         `;
-        tooltip.classList.remove('hidden');
+        strip.classList.remove('hidden');
 
-        // Position relative to the wrap (which is position: relative).
+        // Crosshair: 1px vertical line at the candle's center, full chart height.
+        // The strip is 28px + 4px margin = 32px tall and reserved by md-chart-wrap
+        // padding-top. Crosshair starts there and extends to the chart bottom.
+        const candleX = layout.padding.left + layout.stepX * index + layout.stepX / 2;
         const wrapRect = canvas.parentElement.getBoundingClientRect();
-        const tw = tooltip.offsetWidth;
-        const th = tooltip.offsetHeight;
-        const offset = 12;
-        let left = mouseX + offset;
-        let top = mouseY + offset;
-        if (left + tw > wrapRect.width) left = mouseX - tw - offset;
-        if (top + th > wrapRect.height) top = wrapRect.height - th - 4;
-        if (left < 0) left = 4;
-        if (top < 0) top = 4;
-        tooltip.style.left = `${left}px`;
-        tooltip.style.top = `${top}px`;
+        crosshair.style.left = `${candleX}px`;
+        crosshair.style.height = `${wrapRect.height - 32}px`;
+        crosshair.classList.remove('hidden');
     }
 
     _mdHideTooltip() {
-        const tooltip = document.getElementById('mdTooltip');
-        if (tooltip) tooltip.classList.add('hidden');
+        const strip = document.getElementById('mdTooltipStrip');
+        const crosshair = document.getElementById('mdCrosshair');
+        if (strip) strip.classList.add('hidden');
+        if (crosshair) crosshair.classList.add('hidden');
     }
 
     _mdChartPaintPlaceholder() {

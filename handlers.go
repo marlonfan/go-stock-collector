@@ -135,10 +135,25 @@ func (ws *WebServer) getStockSummary(c *gin.Context) {
 		return
 	}
 
-	// Get latest price
-	currentPrice, lastUpdate, err := ws.collector.database.GetLatestPrice(symbol)
-	if err != nil {
-		// If no price data, return just the daily data
+	// Authoritative current price comes from the most recent daily summary —
+	// it's refreshed every sync via Yahoo's 1d API, which returns live price
+	// during market hours and the official close after. Reading the latest
+	// minute close instead can show stale data if the user synced earlier in
+	// the day and the price moved after, leading to wrong-sign change values.
+	var currentPrice float64
+	if len(dailyData) > 0 {
+		currentPrice = dailyData[0].Close
+	}
+
+	// Last-update timestamp comes from minute data when available (more
+	// precise) and falls back to the daily summary date.
+	_, lastUpdate, _ := ws.collector.database.GetLatestPrice(symbol)
+	if lastUpdate.IsZero() && len(dailyData) > 0 {
+		lastUpdate = dailyData[0].Date
+	}
+
+	if currentPrice == 0 {
+		// Stock added but never synced yet
 		c.JSON(http.StatusOK, StockSummary{
 			Symbol:    symbol,
 			Name:      stockName,
@@ -151,14 +166,13 @@ func (ws *WebServer) getStockSummary(c *gin.Context) {
 		return
 	}
 
-	// Calculate change from previous day's close
+	// Calculate change vs previous trading day's close. Both currentPrice and
+	// previousClose now come from the same daily-summary source so they
+	// can't disagree about which day is "today".
 	var change float64
 	var changePercent float64
-	if len(dailyData) > 0 {
-		previousClose := dailyData[0].Close // Most recent day
-		if len(dailyData) > 1 {
-			previousClose = dailyData[1].Close // Previous day
-		}
+	if len(dailyData) > 1 {
+		previousClose := dailyData[1].Close
 		change = currentPrice - previousClose
 		if previousClose > 0 {
 			changePercent = (change / previousClose) * 100
