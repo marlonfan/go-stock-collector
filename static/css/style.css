@@ -2210,24 +2210,29 @@ tr.pinned-row:hover {
 
 .md-period-tabs {
   display: flex;
-  gap: 4px;
-  padding: 4px 12px 14px;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
+  gap: 6px;
+  padding: 6px 12px 12px;
+  /* No overflow scrolling — all six tabs share width equally so they
+     always fit without horizontal scroll or clipped edges. */
 }
-.md-period-tabs::-webkit-scrollbar { display: none; }
 .md-period-tab {
-  padding: 6px 14px;
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 7px 0;
   border-radius: 8px;
   border: 1px solid #e5e7eb;
   background: #fff;
   color: #0f172a;
   font-size: 12px;
   font-weight: 600;
+  font-family: inherit;
+  text-align: center;
   cursor: pointer;
   white-space: nowrap;
-  flex-shrink: 0;
+  line-height: 1.2;
+  box-sizing: border-box;
 }
 .md-period-tab.is-active {
   background: #3b82f6;
