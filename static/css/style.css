@@ -1980,8 +1980,18 @@ tr.pinned-row:hover {
   gap: 10px;
 }
 .stocks-history .col-stock-flex .col-stock-info { flex: 1; min-width: 0; }
+/* Mini sparkline beside the symbol — explicit fixed width so it doesn't
+   inherit width: 100% from the global .stock-card-sparkline rule and blow
+   the 150px sticky column out, and explicit height since data-height=24
+   is only applied after renderSparkline runs. */
+.stocks-history .col-stock-mini-spark {
+  width: 56px;
+  flex-shrink: 0;
+}
 .stocks-history .col-stock-mini-spark canvas {
   display: block;
+  width: 56px !important;
+  height: 24px !important;
 }
 .stocks-history thead th.col-day-today {
   color: #3b82f6 !important;
