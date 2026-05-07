@@ -1041,7 +1041,20 @@ class StockTracker {
                 const day = dayMap.get(dateStr);
                 if (!day) return '<td class="ohlc-empty">—</td>';
 
-                const dayChg = ((day.close - day.open) / day.open) * 100;
+                // Daily change = THIS day's close vs PREVIOUS trading day's close.
+                // This matches the card / list 'change %' metric (today's price
+                // vs yesterday's close), so the most-recent grid column always
+                // agrees with the per-stock summary in cards/list.
+                // Falls back to intraday (open → close) only for the oldest
+                // visible day where no previous-day row is in the window.
+                let prevClose = null;
+                if (idx < sortedDates.length - 1) {
+                    const prevDay = dayMap.get(sortedDates[idx + 1]);
+                    if (prevDay) prevClose = prevDay.close;
+                }
+                const dayChg = (prevClose != null && prevClose > 0)
+                    ? ((day.close - prevClose) / prevClose) * 100
+                    : ((day.close - day.open) / day.open) * 100;
                 const dayUp = dayChg >= 0;
                 const intensity = this.intensityFor(dayChg);
                 const heatCls = dayUp ? 'ohlc-cell-heat-up' : 'ohlc-cell-heat-down';
