@@ -288,7 +288,10 @@
             <button type="button" class="md-period-tab" data-md-period="365">1Y</button>
         </div>
         <div class="md-card">
-            <div class="md-chart-wrap"><canvas id="mdChart"></canvas></div>
+            <div class="md-chart-wrap" style="position:relative;">
+                <canvas id="mdChart"></canvas>
+                <div id="mdTooltip" class="chart-tooltip hidden"></div>
+            </div>
         </div>
         <div class="md-card">
             <div class="md-card-title">今日 OHLCV</div>

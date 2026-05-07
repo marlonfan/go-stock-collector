@@ -2211,20 +2211,23 @@ tr.pinned-row:hover {
 .md-period-tabs {
   display: flex;
   gap: 4px;
-  padding: 0 12px 8px;
+  padding: 4px 12px 14px;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
 }
+.md-period-tabs::-webkit-scrollbar { display: none; }
 .md-period-tab {
-  padding: 6px 12px;
+  padding: 6px 14px;
   border-radius: 8px;
   border: 1px solid #e5e7eb;
   background: #fff;
   color: #0f172a;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 .md-period-tab.is-active {
   background: #3b82f6;

@@ -1776,59 +1776,87 @@ class StockTracker {
         `).join('');
     }
 
-    // Lightweight candlestick render targeting #mdChart canvas — same OHLC
-    // candle shape as the desktop chart but no period buttons / tooltip yet
-    // since the period selector is the tabs row.
+    // Mobile-detail candlestick render with price + date axes and a touch
+    // tooltip. Layout is cached on this._mdLayout for the pointermove handler
+    // to map x→candle without re-running layout math.
     renderMdChart() {
         const canvas = document.getElementById('mdChart');
         if (!canvas || !this._chartLayout) {
-            // _chartLayout populated by drawCandlestickChart; if data didn't
-            // load yet just paint a placeholder.
             this._mdChartPaintPlaceholder();
+            this._mdLayout = null;
             return;
         }
         const data = this._chartLayout.data;
         const dpr = window.devicePixelRatio || 1;
         const wrap = canvas.parentElement;
-        const width = wrap.clientWidth;
-        const height = 200;
-        canvas.width = width * dpr;
+        const fullWidth = wrap.clientWidth;
+        const height = 220;
+        canvas.width = fullWidth * dpr;
         canvas.height = height * dpr;
         canvas.style.width = '100%';
         canvas.style.height = `${height}px`;
         const ctx = canvas.getContext('2d');
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.scale(dpr, dpr);
-        ctx.clearRect(0, 0, width, height);
+        ctx.clearRect(0, 0, fullWidth, height);
         if (!data || data.length === 0) return;
 
-        const padX = 4, padY = 8;
+        const isDark = document.documentElement.classList.contains('dark');
+        // Reserve space for axes: right for Y price labels, bottom for dates.
+        const padding = { top: 8, right: 52, bottom: 22, left: 6 };
+        const chartWidth = fullWidth - padding.left - padding.right;
+        const chartHeight = height - padding.top - padding.bottom;
+
         let lo = Infinity, hi = -Infinity;
         for (const d of data) {
             if (d.low < lo) lo = d.low;
             if (d.high > hi) hi = d.high;
         }
-        const range = hi - lo || 1;
-        const stepX = (width - padX * 2) / data.length;
-        const cw = Math.max(2, stepX * 0.6);
-        const yFor = (v) => padY + ((hi - v) / range) * (height - 2 * padY);
+        // 5% breathing room top/bottom so candles don't touch edges
+        const span = hi - lo || 1;
+        lo -= span * 0.04;
+        hi += span * 0.04;
+        const range = hi - lo;
+        const stepX = chartWidth / data.length;
+        const cw = Math.max(1.5, stepX * 0.6);
+        const yFor = (v) => padding.top + ((hi - v) / range) * chartHeight;
 
-        // Grid lines
-        const isDark = document.documentElement.classList.contains('dark');
+        // Horizontal grid lines + Y-axis price labels
         ctx.strokeStyle = isDark ? '#334155' : '#e5e7eb';
         ctx.lineWidth = 1;
         ctx.setLineDash([2, 3]);
-        for (let i = 0; i < 4; i++) {
-            const y = padY + ((height - 2 * padY) / 3) * i;
+        ctx.fillStyle = isDark ? '#94a3b8' : '#9ca3af';
+        ctx.font = '10px -apple-system, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        for (let i = 0; i <= 4; i++) {
+            const y = padding.top + (chartHeight / 4) * i;
             ctx.beginPath();
-            ctx.moveTo(padX, y);
-            ctx.lineTo(width - padX, y);
+            ctx.moveTo(padding.left, y);
+            ctx.lineTo(padding.left + chartWidth, y);
             ctx.stroke();
+            const price = hi - (range / 4) * i;
+            ctx.fillText(this.formatPrice(price), padding.left + chartWidth + 6, y);
         }
         ctx.setLineDash([]);
 
+        // X-axis date labels (every Nth bar so they don't overlap)
+        const labelInterval = Math.max(1, Math.ceil((data.length * 50) / chartWidth));
+        ctx.fillStyle = isDark ? '#94a3b8' : '#9ca3af';
+        ctx.font = '10px -apple-system, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        for (let i = 0; i < data.length; i += labelInterval) {
+            const x = padding.left + stepX * i + stepX / 2;
+            ctx.fillText(
+                this.formatChartDate(data[i].timestamp, this.currentChartPeriod),
+                x, padding.top + chartHeight + 6
+            );
+        }
+
+        // Candles
         data.forEach((bar, i) => {
-            const x = padX + stepX * i + stepX / 2;
+            const x = padding.left + stepX * i + stepX / 2;
             const oY = yFor(bar.open);
             const cY = yFor(bar.close);
             const hY = yFor(bar.high);
@@ -1851,6 +1879,85 @@ class StockTracker {
                 ctx.fillRect(x - cw / 2, top, cw, ht);
             }
         });
+
+        // Cache for tooltip
+        this._mdLayout = {
+            data, padding, chartWidth, chartHeight, stepX,
+            canvasHeight: height, canvasWidth: fullWidth,
+        };
+
+        this._setupMdTooltip();
+    }
+
+    _setupMdTooltip() {
+        const canvas = document.getElementById('mdChart');
+        if (!canvas) return;
+        if (this._mdHoverHandler) {
+            canvas.removeEventListener('pointermove', this._mdHoverHandler);
+            canvas.removeEventListener('pointerleave', this._mdLeaveHandler);
+            canvas.removeEventListener('pointercancel', this._mdLeaveHandler);
+        }
+        this._mdHoverHandler = (e) => this._mdShowTooltipAt(e);
+        this._mdLeaveHandler = () => this._mdHideTooltip();
+        canvas.addEventListener('pointermove', this._mdHoverHandler);
+        canvas.addEventListener('pointerleave', this._mdLeaveHandler);
+        canvas.addEventListener('pointercancel', this._mdLeaveHandler);
+    }
+
+    _mdShowTooltipAt(e) {
+        const layout = this._mdLayout;
+        const canvas = document.getElementById('mdChart');
+        const tooltip = document.getElementById('mdTooltip');
+        if (!layout || !canvas || !tooltip) return;
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+        const relX = mouseX - layout.padding.left;
+        const index = Math.floor(relX / layout.stepX);
+        if (
+            index < 0 || index >= layout.data.length ||
+            mouseY < layout.padding.top ||
+            mouseY > layout.padding.top + layout.chartHeight
+        ) {
+            this._mdHideTooltip();
+            return;
+        }
+        const bar = layout.data[index];
+        const isUp = bar.close >= bar.open;
+        const trend = isUp ? 'up' : 'down';
+        const change = bar.close - bar.open;
+        const pct = bar.open > 0 ? (change / bar.open) * 100 : 0;
+        const sign = change >= 0 ? '+' : '';
+
+        tooltip.innerHTML = `
+            <div class="chart-tooltip-time">${this.formatTooltipTime(bar.timestamp, this.currentChartPeriod)}</div>
+            <div class="chart-tooltip-row"><span class="chart-tooltip-label">Open</span><span class="chart-tooltip-value">${this.formatPrice(bar.open)}</span></div>
+            <div class="chart-tooltip-row"><span class="chart-tooltip-label">High</span><span class="chart-tooltip-value">${this.formatPrice(bar.high)}</span></div>
+            <div class="chart-tooltip-row"><span class="chart-tooltip-label">Low</span><span class="chart-tooltip-value">${this.formatPrice(bar.low)}</span></div>
+            <div class="chart-tooltip-row"><span class="chart-tooltip-label">Close</span><span class="chart-tooltip-value ${trend}">${this.formatPrice(bar.close)}</span></div>
+            <div class="chart-tooltip-row"><span class="chart-tooltip-label">Chg</span><span class="chart-tooltip-value ${trend}">${sign}${change.toFixed(2)} (${sign}${pct.toFixed(2)}%)</span></div>
+            <div class="chart-tooltip-row"><span class="chart-tooltip-label">Vol</span><span class="chart-tooltip-value">${this.formatVolume(bar.volume)}</span></div>
+        `;
+        tooltip.classList.remove('hidden');
+
+        // Position relative to the wrap (which is position: relative).
+        const wrapRect = canvas.parentElement.getBoundingClientRect();
+        const tw = tooltip.offsetWidth;
+        const th = tooltip.offsetHeight;
+        const offset = 12;
+        let left = mouseX + offset;
+        let top = mouseY + offset;
+        if (left + tw > wrapRect.width) left = mouseX - tw - offset;
+        if (top + th > wrapRect.height) top = wrapRect.height - th - 4;
+        if (left < 0) left = 4;
+        if (top < 0) top = 4;
+        tooltip.style.left = `${left}px`;
+        tooltip.style.top = `${top}px`;
+    }
+
+    _mdHideTooltip() {
+        const tooltip = document.getElementById('mdTooltip');
+        if (tooltip) tooltip.classList.add('hidden');
     }
 
     _mdChartPaintPlaceholder() {
