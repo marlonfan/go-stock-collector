@@ -1348,7 +1348,7 @@ tr.pinned-row:hover {
   white-space: nowrap;
   font-family: var(--system-font);
   text-align: center;
-  min-width: 84px;
+  min-width: 92px;
 }
 
 .stocks-history thead th.col-stock {
@@ -1938,27 +1938,42 @@ tr.pinned-row:hover {
 }
 .stocks-history .day-chg.up { color: var(--color-up-text); }
 .stocks-history .day-chg.down { color: var(--color-down-text); }
-.stocks-history .day-close {
+/* OHLC stack inside each day cell — 4 labeled rows under the change %.
+   Labels are slightly dimmed; H/L labels carry the green/red hint, the
+   close VALUE picks up the day's direction so users can scan close
+   trends without reading the % header. */
+.stocks-history .day-ohlc {
+  margin-top: 4px;
   font-size: 10px;
-  font-weight: 500;
-  margin-top: 2px;
-  text-align: center;
-  color: #6b7280;
-  font-family: 'SF Mono', Monaco, monospace;
-  font-variant-numeric: tabular-nums;
+  line-height: 1.35;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
 }
-.dark .stocks-history .day-close { color: #94a3b8; }
-.stocks-history .day-hl {
-  font-size: 9px;
-  margin-top: 2px;
+.stocks-history .day-ohlc .ohlc-row {
   display: flex;
   justify-content: space-between;
-  gap: 4px;
-  font-family: 'SF Mono', Monaco, monospace;
-  font-variant-numeric: tabular-nums;
+  align-items: baseline;
+  gap: 6px;
+  padding: 0 2px;
 }
-.stocks-history .day-hl .hl-h { color: var(--color-up); }
-.stocks-history .day-hl .hl-l { color: var(--color-down); }
+.stocks-history .day-ohlc .lbl {
+  font-size: 9px;
+  font-weight: 700;
+  color: #9ca3af;
+  letter-spacing: 0.04em;
+}
+.stocks-history .day-ohlc .lbl-up { color: var(--color-up); }
+.stocks-history .day-ohlc .lbl-down { color: var(--color-down); }
+.stocks-history .day-ohlc .val {
+  font-size: 10px;
+  font-weight: 500;
+  color: #374151;
+}
+.dark .stocks-history .day-ohlc .lbl { color: #64748b; }
+.dark .stocks-history .day-ohlc .val { color: #d1d5db; }
+.stocks-history .day-ohlc .val.up { color: var(--color-up); font-weight: 600; }
+.stocks-history .day-ohlc .val.down { color: var(--color-down); font-weight: 600; }
 .stocks-history .col-stock-flex {
   display: flex;
   align-items: center;

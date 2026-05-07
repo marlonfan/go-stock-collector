@@ -1049,10 +1049,11 @@ class StockTracker {
                 return `
                     <td class="${heatCls}" style="--intensity:${intensity.toFixed(3)}">
                         <div class="day-chg ${dayUp ? 'up' : 'down'}">${dayUp ? '+' : ''}${dayChg.toFixed(2)}%</div>
-                        <div class="day-close">${this.formatPrice(day.close)}</div>
-                        <div class="day-hl">
-                            <span class="hl-h">${day.high.toFixed(0)}</span>
-                            <span class="hl-l">${day.low.toFixed(0)}</span>
+                        <div class="day-ohlc mono">
+                            <div class="ohlc-row"><span class="lbl">O</span><span class="val">${this._formatCompact(day.open)}</span></div>
+                            <div class="ohlc-row"><span class="lbl lbl-up">H</span><span class="val">${this._formatCompact(day.high)}</span></div>
+                            <div class="ohlc-row"><span class="lbl lbl-down">L</span><span class="val">${this._formatCompact(day.low)}</span></div>
+                            <div class="ohlc-row"><span class="lbl">C</span><span class="val ${dayUp ? 'up' : 'down'}">${this._formatCompact(day.close)}</span></div>
                         </div>
                     </td>
                 `;
