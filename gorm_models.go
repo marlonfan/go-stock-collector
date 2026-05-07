@@ -47,6 +47,11 @@ type WatchedStock struct {
 	Symbol    string     `gorm:"index;not null" json:"symbol"`
 	Name      string     `gorm:"" json:"name"`
 	Pinned    bool       `gorm:"default:false;not null" json:"pinned"`
+	// Lightweight fundamentals refreshed during sync via Yahoo quoteSummary.
+	// Shared market data so UpdateQuoteFundamentals updates every user's row
+	// for a given symbol at once.
+	MarketCap string     `gorm:"" json:"marketCap"`
+	PERatio   *float64   `gorm:"" json:"peRatio"`
 	AddedAt   time.Time  `gorm:"autoCreateTime" json:"addedAt"`
 	LastSync  *time.Time `gorm:"" json:"lastSync"`
 	IsActive  bool       `gorm:"default:true;not null" json:"isActive"`

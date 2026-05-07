@@ -261,6 +261,54 @@
         </div>
     </div>
 
+    <!-- Mobile detail overlay (full-screen, replaces K-line modal on phones) -->
+    <div id="mobileDetail" class="mobile-detail hidden">
+        <div class="md-nav">
+            <button type="button" class="md-nav-back" id="mdBack" aria-label="Back">‹</button>
+            <div class="md-nav-title">
+                <div class="md-nav-symbol" id="mdSymbol">—</div>
+                <div class="md-nav-name" id="mdName">—</div>
+            </div>
+            <button type="button" class="md-nav-action" id="mdPin" title="Pin">★</button>
+            <button type="button" class="md-nav-action" id="mdSync" title="Sync">↻</button>
+        </div>
+        <div class="md-hero">
+            <div class="md-hero-price mono" id="mdPrice">—</div>
+            <div class="md-hero-change">
+                <span class="md-hero-change-text mono" id="mdChange">—</span>
+                <span class="md-hero-change-time" id="mdLastUpdate"></span>
+            </div>
+        </div>
+        <div class="md-period-tabs" id="mdPeriodTabs">
+            <button type="button" class="md-period-tab" data-md-period="1">1D</button>
+            <button type="button" class="md-period-tab" data-md-period="5">5D</button>
+            <button type="button" class="md-period-tab" data-md-period="30">1M</button>
+            <button type="button" class="md-period-tab is-active" data-md-period="90">3M</button>
+            <button type="button" class="md-period-tab" data-md-period="180">6M</button>
+            <button type="button" class="md-period-tab" data-md-period="365">1Y</button>
+        </div>
+        <div class="md-card">
+            <div class="md-chart-wrap"><canvas id="mdChart"></canvas></div>
+        </div>
+        <div class="md-card">
+            <div class="md-card-title">今日 OHLCV</div>
+            <div class="md-ohlc-grid" id="mdOhlc"></div>
+            <div class="md-section-divider">
+                <div style="display:flex; justify-content:space-between; font-size:10px; color:#6b7280; margin-bottom:4px;">
+                    <span>今日区间</span>
+                    <span class="mono" id="mdRangeText">—</span>
+                </div>
+                <div id="mdDayRange"></div>
+            </div>
+        </div>
+        <div class="md-card">
+            <div class="md-card-title">趋势 / 基本面</div>
+            <div id="md52W"></div>
+            <div class="md-fundamentals-grid" id="mdFundamentals"></div>
+        </div>
+        <div style="height:24px"></div>
+    </div>
+
     <script src="/static/js/app.js"></script>
 </body>
 </html>

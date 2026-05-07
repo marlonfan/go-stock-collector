@@ -118,6 +118,16 @@ func (sc *StockCollector) CollectHistoricalData(symbol string, days int) error {
 		}
 	}
 
+	// Refresh marketCap / P/E from Yahoo quoteSummary. Best-effort: a failure
+	// here doesn't fail the whole sync, since price data already landed above.
+	if fundamentals, err := sc.yahooClient.GetQuoteSummary(symbol); err != nil {
+		log.Printf("Warning: quoteSummary failed for %s: %v", symbol, err)
+	} else {
+		if dbErr := sc.database.UpdateQuoteFundamentals(symbol, fundamentals.MarketCap, fundamentals.PERatio); dbErr != nil {
+			log.Printf("Warning: persisting fundamentals failed for %s: %v", symbol, dbErr)
+		}
+	}
+
 	// Log statistics
 	count, earliest, latest, err := sc.database.GetDataStats(symbol)
 	if err != nil {

@@ -385,8 +385,14 @@ class StockTracker {
 
             // Esc: close topmost open thing
             if (e.key === 'Escape') {
+                const mobileDetail = document.getElementById('mobileDetail');
                 const chartModal = document.getElementById('chartModal');
                 const addModal = document.getElementById('addStockModal');
+                if (mobileDetail && !mobileDetail.classList.contains('hidden')) {
+                    this.hideMobileDetail();
+                    e.preventDefault();
+                    return;
+                }
                 if (chartModal && !chartModal.classList.contains('hidden')) {
                     this.hideChartModal();
                     e.preventDefault();
@@ -740,37 +746,153 @@ class StockTracker {
         });
 
         // Toggle layout class without dropping `hidden` (managed by show/hide methods)
-        container.classList.remove('stocks-grid', 'stocks-list-wrap', 'stocks-history-wrap');
+        container.classList.remove('stocks-grid', 'stocks-list-wrap', 'stocks-history-wrap', 'stocks-mobile-list');
+        const isMobile = window.innerWidth <= 640;
+
         if (this.viewMode === 'list') {
-            container.classList.add('stocks-list-wrap');
-            container.innerHTML = this.listHTML(symbols);
+            if (isMobile) {
+                container.classList.add('stocks-mobile-list');
+                container.innerHTML = this.mobileListHTML(symbols, pinned);
+            } else {
+                container.classList.add('stocks-list-wrap');
+                container.innerHTML = this.listHTML(symbols);
+            }
         } else if (this.viewMode === 'grid') {
             container.classList.add('stocks-history-wrap');
             container.innerHTML = this.gridHTML(symbols);
         } else {
             container.classList.add('stocks-grid');
-            container.innerHTML = symbols.map(symbol => this.cardHTML(this.stocks.get(symbol))).join('');
+            container.innerHTML = isMobile
+                ? this.mobileCardsHTML(symbols, pinned)
+                : symbols.map(symbol => this.cardHTML(this.stocks.get(symbol))).join('');
         }
 
         // Defer sparkline render past the layout the browser is about to do.
         requestAnimationFrame(() => this.renderAllSparklines());
     }
 
+    // Mobile cards view splits into PINNED / WATCHLIST sections so users can
+    // visually scan their own picks before the rest. Both sections use the
+    // same cardHTML so the visual treatment matches desktop, just denser.
+    mobileCardsHTML(symbols, pinnedList) {
+        const pinned = symbols.filter(s => pinnedList.includes(s));
+        const others = symbols.filter(s => !pinnedList.includes(s));
+        const renderSection = (title, sub, syms) => {
+            if (syms.length === 0) return '';
+            const cards = syms.map(s => this.cardHTML(this.stocks.get(s))).join('');
+            return `
+                <div class="mobile-section-header">
+                    <span class="mobile-section-header-title">${title}</span>
+                    <span class="mobile-section-header-sub">${sub}</span>
+                </div>
+                ${cards}
+            `;
+        };
+        return `
+            ${renderSection('📌 Pinned', `${pinned.length} stocks`, pinned)}
+            ${renderSection('Watchlist', `${others.length} stocks`, others)}
+        `;
+    }
+
+    // Mobile list — different layout than the desktop table. Each row is a
+    // 2-line stack with symbol/name/vol on the left, sparkline+day-range in
+    // the middle, price+pill on the right. Targets ~58px row height so a
+    // phone fits 8-10 rows.
+    mobileListHTML(symbols, pinnedList) {
+        const stocks = symbols.map(s => this.stocks.get(s)).filter(Boolean);
+        let upCount = 0, downCount = 0;
+        for (const s of stocks) {
+            if ((s.change || 0) >= 0) upCount++; else downCount++;
+        }
+        const total = stocks.length;
+        const pinnedCount = pinnedList.length;
+
+        const rows = symbols.map(sym => this.mobileRowHTML(this.stocks.get(sym))).join('');
+        return `
+            <div class="list-toolbar">
+                <button type="button" class="list-toolbar-btn is-active">全部 ${total}</button>
+                <button type="button" class="list-toolbar-btn">📌 ${pinnedCount}</button>
+                <button type="button" class="list-toolbar-btn">↑ ${upCount}</button>
+                <button type="button" class="list-toolbar-btn">↓ ${downCount}</button>
+            </div>
+            ${rows}
+        `;
+    }
+
+    mobileRowHTML(stock) {
+        if (!stock) return '';
+        const symbol = stock.symbol;
+        const isPinned = this.isPinned(symbol);
+        const change = stock.change || 0;
+        const changePct = stock.changePercent || 0;
+        const last = stock.dailyData && stock.dailyData[0];
+        const prev = this.prevCloseFor(stock);
+        const dayRange = last
+            ? this.dayRangeBarHTML(last.low, last.high, stock.currentPrice || last.close, prev)
+            : '';
+        return `
+            <div class="mobile-stock-row${isPinned ? ' pinned' : ''}" data-symbol="${symbol}" data-action="open-chart">
+                <div class="mobile-stock-row-left">
+                    <div class="mobile-stock-row-symbol">${symbol}</div>
+                    <div class="mobile-stock-row-name">${this._escape(stock.name || '')}</div>
+                    <div class="mobile-stock-row-vol">V ${last ? this.formatVolume(last.volume) : '—'}</div>
+                </div>
+                <div class="mobile-stock-row-mid">
+                    ${this.sparklineCanvasHTML(symbol, { days: 15, height: 22, fill: false })}
+                    ${dayRange}
+                </div>
+                <div class="mobile-stock-row-right">
+                    <div class="mobile-stock-row-price">${this.formatPrice(stock.currentPrice || 0)}</div>
+                    ${this.trendPillHTML(changePct, { size: 'sm', strong: true })}
+                </div>
+            </div>
+        `;
+    }
+
     listHTML(symbols) {
+        const stocks = symbols.map(s => this.stocks.get(s)).filter(Boolean);
+        const total = stocks.length;
+        let upCount = 0, downCount = 0;
+        for (const s of stocks) {
+            if ((s.change || 0) >= 0) upCount++; else downCount++;
+        }
+
+        // Last-sync from the most recently synced row (max lastSync)
+        let mostRecent = null;
+        for (const s of stocks) {
+            const t = s.lastUpdate || s.lastSync;
+            if (!t) continue;
+            const tt = new Date(t).getTime();
+            if (!mostRecent || tt > mostRecent) mostRecent = tt;
+        }
+        const subText = mostRecent
+            ? `${total} 只 · 上次同步 ${this.formatRelativeTime(mostRecent)}`
+            : `${total} 只 · 暂未同步`;
+
         const rows = symbols.map(s => this.rowHTML(this.stocks.get(s))).join('');
         return `
+            <div class="stocks-list-toolbar">
+                <div>
+                    <div class="stocks-list-toolbar-title">我的关注 · ${total}</div>
+                    <div class="stocks-list-toolbar-sub">${subText}</div>
+                </div>
+                <div class="stocks-list-toolbar-badges">
+                    <span class="list-badge-up">↑ ${upCount}</span>
+                    <span class="list-badge-down">↓ ${downCount}</span>
+                </div>
+            </div>
             <table class="stocks-list">
                 <thead>
                     <tr>
                         <th class="pin-cell"></th>
                         <th class="col-symbol">Stock</th>
-                        <th>Price</th>
-                        <th>Change</th>
+                        <th>Last</th>
+                        <th>Chg %</th>
+                        <th>Day Range</th>
                         <th>Open</th>
-                        <th>High</th>
-                        <th>Low</th>
-                        <th>Close</th>
-                        <th class="col-vol">Vol</th>
+                        <th>High · Low</th>
+                        <th class="col-vol">Vol / Avg</th>
+                        <th>52W</th>
                         <th class="col-spark">30D</th>
                         <th class="col-actions"></th>
                     </tr>
@@ -787,19 +909,26 @@ class StockTracker {
         const change = stock.change || 0;
         const changePct = stock.changePercent || 0;
         const isUp = change >= 0;
-        const trendClass = isUp ? 'trend-up' : 'trend-down';
         const sign = isUp ? '+' : '';
-        const last = stock.dailyData && stock.dailyData[0]; // DESC, so [0] is latest
-        const open = last ? this.formatPrice(last.open) : '—';
-        const high = last ? this.formatPrice(last.high) : '—';
-        const low = last ? this.formatPrice(last.low) : '—';
-        const close = last ? this.formatPrice(last.close) : '—';
-        const vol = last ? this.formatVolume(last.volume) : '—';
-        const pinnedRowClass = isPinned ? ' pinned' : '';
+        const last = stock.dailyData && stock.dailyData[0];
+        const prevClose = this.prevCloseFor(stock);
+        const r52 = this.range52WFor(stock);
+        const avgVol = this.avgVolumeFor(stock, 30);
+        const pinnedRowClass = isPinned ? 'pinned' : '';
+
+        const dayRangeHTML = last
+            ? this.dayRangeBarHTML(last.low, last.high, stock.currentPrice || last.close, prevClose, { label: true })
+            : '<span class="text-gray-400">—</span>';
+        const yearRangeHTML = r52
+            ? this.yearRangeBarHTML(r52.low, r52.high, stock.currentPrice || (last ? last.close : 0))
+            : '<span class="text-gray-400">—</span>';
+        const volRatioHTML = last
+            ? this.volumeRatioHTML(last.volume, avgVol || last.volume)
+            : '<span class="text-gray-400">—</span>';
 
         return `
-            <tr data-symbol="${symbol}" data-action="open-chart"${pinnedRowClass ? ` class="${pinnedRowClass.trim()}"` : ''}>
-                <td class="pin-cell" data-stop="1">
+            <tr data-symbol="${symbol}" data-action="open-chart" class="${pinnedRowClass}">
+                <td class="pin-cell">
                     <button type="button" class="pin-btn ${isPinned ? 'is-pinned' : ''}"
                         data-action="pin" data-symbol="${symbol}" title="${isPinned ? 'Unpin' : 'Pin'}">
                         <svg class="w-4 h-4" fill="${isPinned ? 'currentColor' : 'none'}" stroke="currentColor" viewBox="0 0 24 24">
@@ -808,18 +937,26 @@ class StockTracker {
                     </button>
                 </td>
                 <td class="col-symbol">
-                    <div class="row-symbol">${symbol}</div>
+                    <div class="row-symbol mono">${symbol}</div>
                     <div class="row-name">${this._escape(stock.name || '')}</div>
                 </td>
-                <td class="col-num-strong">${this.formatPrice(stock.currentPrice || 0)}</td>
-                <td class="${trendClass}">${sign}${changePct.toFixed(2)}%</td>
-                <td>${open}</td>
-                <td>${high}</td>
-                <td>${low}</td>
-                <td class="col-num-strong">${close}</td>
-                <td class="col-vol">${vol}</td>
+                <td class="col-num-strong mono">
+                    ${this.formatPrice(stock.currentPrice || 0)}
+                    <div class="row-last-abs ${isUp ? 'up' : 'down'}">${sign}${change.toFixed(2)}</div>
+                </td>
+                <td>${this.heatCellHTML(changePct, `${sign}${changePct.toFixed(2)}%`)}</td>
+                <td>${dayRangeHTML}</td>
+                <td class="mono">${last ? this.formatPrice(last.open) : '—'}</td>
+                <td>
+                    <div class="high-low-stack">
+                        <div class="hl-h">${last ? this.formatPrice(last.high) : '—'}</div>
+                        <div class="hl-l">${last ? this.formatPrice(last.low) : '—'}</div>
+                    </div>
+                </td>
+                <td class="col-vol">${volRatioHTML}</td>
+                <td>${yearRangeHTML}</td>
                 <td class="col-spark">
-                    <canvas class="stock-card-sparkline" data-symbol="${symbol}"></canvas>
+                    ${this.sparklineCanvasHTML(symbol, { days: 30, height: 36 })}
                 </td>
                 <td class="col-actions">
                     <div class="col-actions-inner">
@@ -841,14 +978,13 @@ class StockTracker {
         `;
     }
 
-    // History grid: rows = stocks, columns = trading days, cells = full OHLCV.
-    // Reuses the original "horizontal grid" idea — best for scanning daily
-    // patterns across multiple stocks. Cap at the most recent 30 dates so the
-    // table stays usable with many stocks; horizontal scroll handles overflow.
+    // History grid: rows = stocks, columns = trading days. Cells are now
+    // heatmap-tinted by daily change %. The sticky stock column carries a
+    // mini 15-day sparkline + current price. Today's column header is
+    // highlighted in blue.
     gridHTML(symbols) {
         const MAX_DATES = 30;
 
-        // Build the union of dates across all stocks (date-only string keys).
         const dateSet = new Set();
         const stockData = new Map();
         for (const sym of symbols) {
@@ -864,8 +1000,13 @@ class StockTracker {
         }
 
         const sortedDates = Array.from(dateSet).sort().reverse().slice(0, MAX_DATES);
+        const todayKey = sortedDates[0];
 
-        const headerCells = sortedDates.map(d => `<th>${this._formatGridDate(d)}</th>`).join('');
+        const headerCells = sortedDates.map(d => {
+            const cls = d === todayKey ? 'col-day-today' : '';
+            const label = d === todayKey ? 'TODAY' : this._formatGridDate(d);
+            return `<th class="${cls}">${label}</th>`;
+        }).join('');
 
         const rows = symbols.filter(s => stockData.has(s)).map(sym => {
             const stock = stockData.get(sym);
@@ -876,39 +1017,21 @@ class StockTracker {
             const change = stock.change || 0;
             const changePct = stock.changePercent || 0;
             const isUp = change >= 0;
-            const trendClass = isUp ? 'trend-up' : 'trend-down';
             const sign = isUp ? '+' : '';
 
             const stockCell = `
                 <td class="col-stock">
-                    <div class="stock-meta">
-                        <div class="stock-meta-info">
-                            <div class="stock-meta-symbol" data-action="open-chart" data-symbol="${sym}" title="Open chart">${sym}</div>
+                    <div class="col-stock-flex">
+                        <div class="col-stock-info">
+                            <div class="stock-meta-symbol mono" data-action="open-chart" data-symbol="${sym}" title="Open chart">${sym}</div>
                             <div class="stock-meta-name">${this._escape(stock.name || '')}</div>
-                            <div class="stock-meta-price ${trendClass}">
+                            <div class="stock-meta-price mono ${isUp ? 'trend-up' : 'trend-down'}">
                                 ${this.formatPrice(stock.currentPrice || 0)}
-                                <span style="font-size:11px;opacity:.85;">${sign}${changePct.toFixed(2)}%</span>
+                                <span style="font-size:10px;opacity:.85;margin-left:4px;">${sign}${changePct.toFixed(2)}%</span>
                             </div>
                         </div>
-                        <div class="stock-meta-actions">
-                            <button type="button" class="stock-card-action-btn ${isPinned ? 'is-pinned' : ''}"
-                                data-action="pin" data-symbol="${sym}" title="${isPinned ? 'Unpin' : 'Pin'}">
-                                <svg class="w-4 h-4" fill="${isPinned ? 'currentColor' : 'none'}" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2l3.09 6.32L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.05L12 2z"></path>
-                                </svg>
-                            </button>
-                            <button type="button" class="stock-card-action-btn js-sync-btn"
-                                data-action="sync" data-symbol="${sym}" title="Sync data">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                                </svg>
-                            </button>
-                            <button type="button" class="stock-card-action-btn is-danger"
-                                data-action="remove" data-symbol="${sym}" title="Remove">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-                                </svg>
-                            </button>
+                        <div class="col-stock-mini-spark">
+                            ${this.sparklineCanvasHTML(sym, { days: 15, height: 24, fill: false, classExtra: 'mini-spark' })}
                         </div>
                     </div>
                 </td>
@@ -918,32 +1041,24 @@ class StockTracker {
                 const day = dayMap.get(dateStr);
                 if (!day) return '<td class="ohlc-empty">—</td>';
 
-                // Compare today's close vs yesterday's close (yesterday = next index since DESC)
-                let prevClose = null;
-                if (idx < sortedDates.length - 1) {
-                    const prev = dayMap.get(sortedDates[idx + 1]);
-                    if (prev) prevClose = prev.close;
-                }
-                // Open color: green if open >= prev close (gap up), red if gap down
-                let openTrend = '';
-                if (prevClose !== null) openTrend = day.open >= prevClose ? 'trend-up' : 'trend-down';
-                // Close color: green if close >= open (bullish bar), red if bearish
-                const closeTrend = day.close >= day.open ? 'trend-up' : 'trend-down';
+                const dayChg = ((day.close - day.open) / day.open) * 100;
+                const dayUp = dayChg >= 0;
+                const intensity = this.intensityFor(dayChg);
+                const heatCls = dayUp ? 'ohlc-cell-heat-up' : 'ohlc-cell-heat-down';
 
                 return `
-                    <td>
-                        <div class="ohlc-cell">
-                            <div class="ohlc-open ${openTrend}">O ${this._formatCompact(day.open)}</div>
-                            <div class="ohlc-high">H ${this._formatCompact(day.high)}</div>
-                            <div class="ohlc-low">L ${this._formatCompact(day.low)}</div>
-                            <div class="ohlc-close ${closeTrend}">C ${this._formatCompact(day.close)}</div>
-                            <div class="ohlc-volume text-gray-500">${this.formatVolume(day.volume)}</div>
+                    <td class="${heatCls}" style="--intensity:${intensity.toFixed(3)}">
+                        <div class="day-chg ${dayUp ? 'up' : 'down'}">${dayUp ? '+' : ''}${dayChg.toFixed(2)}%</div>
+                        <div class="day-close">${this.formatPrice(day.close)}</div>
+                        <div class="day-hl">
+                            <span class="hl-h">${day.high.toFixed(0)}</span>
+                            <span class="hl-l">${day.low.toFixed(0)}</span>
                         </div>
                     </td>
                 `;
             }).join('');
 
-            return `<tr data-symbol="${sym}"${isPinned ? ' class="pinned"' : ''}>${stockCell}${dayCells}</tr>`;
+            return `<tr data-symbol="${sym}" data-action="open-chart"${isPinned ? ' class="pinned"' : ''}>${stockCell}${dayCells}</tr>`;
         }).join('');
 
         return `
@@ -981,11 +1096,12 @@ class StockTracker {
         const change = stock.change || 0;
         const changePct = stock.changePercent || 0;
         const isUp = change >= 0;
-        const trendClass = isUp ? 'trend-up' : 'trend-down';
         const sign = isUp ? '+' : '';
-        const lastBar = stock.dailyData && stock.dailyData[0]; // dailyData is DESC
-        const volume = lastBar ? this.formatVolume(lastBar.volume) : '—';
-        const lastUpdate = stock.lastUpdate ? this.formatRelativeTime(stock.lastUpdate) : '—';
+        const last = stock.dailyData && stock.dailyData[0];
+        const r52 = this.range52WFor(stock);
+        const closeTrend = last ? (last.close >= last.open ? 'up' : 'down') : '';
+        const peText = (stock.peRatio != null) ? Number(stock.peRatio).toFixed(1) : '—';
+        const mktCap = stock.marketCap || '—';
 
         const pinnedClass = isPinned ? ' pinned' : '';
         const pinBtnClass = isPinned ? 'is-pinned' : '';
@@ -993,10 +1109,11 @@ class StockTracker {
 
         return `
             <div class="stock-card${pinnedClass}" data-symbol="${symbol}" data-action="open-chart">
+                <div class="stock-card-trend-stripe ${isUp ? 'up' : 'down'}"></div>
                 <div class="stock-card-syncing-overlay"></div>
                 <div class="stock-card-head">
                     <div style="min-width: 0;">
-                        <div class="stock-card-symbol">${symbol}</div>
+                        <div class="stock-card-symbol mono">${symbol}</div>
                         <div class="stock-card-name">${this._escape(stock.name || '')}</div>
                     </div>
                     <div class="stock-card-actions">
@@ -1020,14 +1137,41 @@ class StockTracker {
                         </button>
                     </div>
                 </div>
-                <div class="stock-card-price">${this.formatPrice(stock.currentPrice || 0)}</div>
-                <div class="stock-card-change ${trendClass}">${sign}${this.formatPrice(change)} &nbsp; ${sign}${changePct.toFixed(2)}%</div>
-                <div class="stock-card-sparkline-wrap">
-                    <canvas class="stock-card-sparkline" data-symbol="${symbol}"></canvas>
+                <div class="stock-card-price-row">
+                    <span class="stock-card-price mono">${this.formatPrice(stock.currentPrice || 0)}</span>
+                    ${this.trendPillHTML(changePct, { size: 'md' })}
+                    <span class="stock-card-abs ${isUp ? 'up' : 'down'}">${sign}${change.toFixed(2)}</span>
                 </div>
-                <div class="stock-card-foot">
-                    <span>Vol ${volume}</span>
-                    <span>${lastUpdate}</span>
+                <div class="stock-card-ohlc">
+                    <div class="stock-card-ohlc-cell">
+                        <span class="stock-card-ohlc-label">O</span>
+                        <span class="stock-card-ohlc-value">${last ? this.formatPrice(last.open) : '—'}</span>
+                    </div>
+                    <div class="stock-card-ohlc-cell">
+                        <span class="stock-card-ohlc-label">H</span>
+                        <span class="stock-card-ohlc-value up">${last ? this.formatPrice(last.high) : '—'}</span>
+                    </div>
+                    <div class="stock-card-ohlc-cell">
+                        <span class="stock-card-ohlc-label">L</span>
+                        <span class="stock-card-ohlc-value down">${last ? this.formatPrice(last.low) : '—'}</span>
+                    </div>
+                    <div class="stock-card-ohlc-cell">
+                        <span class="stock-card-ohlc-label">V</span>
+                        <span class="stock-card-ohlc-value">${last ? this.formatVolume(last.volume) : '—'}</span>
+                    </div>
+                </div>
+                <div class="stock-card-sparkline-wrap">
+                    ${this.sparklineCanvasHTML(symbol, { days: 30, height: 48 })}
+                </div>
+                <div class="stock-card-footer-grid">
+                    <div class="stock-card-footer-left">
+                        <span class="stock-card-footer-label">52W Range</span>
+                        ${r52 ? this.yearRangeBarHTML(r52.low, r52.high, stock.currentPrice || 0) : '<span class="stock-card-footer-label">—</span>'}
+                    </div>
+                    <div class="stock-card-footer-right">
+                        <div>市值 <span class="fund-value">${this._escape(mktCap)}</span></div>
+                        <div>P/E <span class="fund-value">${peText}</span></div>
+                    </div>
                 </div>
             </div>
         `;
@@ -1080,21 +1224,25 @@ class StockTracker {
 
     renderSparkline(canvas, stock) {
         if (!canvas) return;
+        // Customizable per-instance via data attributes set by the HTML builder.
+        const days = parseInt(canvas.dataset.days, 10) || 30;
+        const heightAttr = parseInt(canvas.dataset.height, 10);
+        const fillMode = canvas.dataset.fill !== 'false';
+        const dpr = window.devicePixelRatio || 1;
         const rect = canvas.getBoundingClientRect();
         const width = Math.max(1, rect.width);
-        const height = 56;
-        const dpr = window.devicePixelRatio || 1;
+        const height = heightAttr || 56;
         canvas.width = width * dpr;
         canvas.height = height * dpr;
+        canvas.style.height = `${height}px`;
         const ctx = canvas.getContext('2d');
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.scale(dpr, dpr);
         ctx.clearRect(0, 0, width, height);
 
         const series = stock && Array.isArray(stock.dailyData) ? stock.dailyData : [];
+        const styles = getComputedStyle(document.documentElement);
         if (series.length < 2) {
-            // Flat midline placeholder
-            const styles = getComputedStyle(document.documentElement);
             ctx.strokeStyle = styles.getPropertyValue('--color-up').trim() || '#10b981';
             ctx.lineWidth = 1.5;
             ctx.globalAlpha = 0.3;
@@ -1106,46 +1254,178 @@ class StockTracker {
             return;
         }
 
-        // dailyData is DESC; reverse to chronological for left-to-right plotting.
-        const closes = series.slice().reverse().slice(-30).map(d => d.close);
+        // dailyData is DESC; reverse to chronological for left-to-right plot
+        const closes = series.slice().reverse().slice(-days).map(d => d.close);
         let lo = Infinity, hi = -Infinity;
         for (const c of closes) { if (c < lo) lo = c; if (c > hi) hi = c; }
         const range = hi - lo || 1;
-        const padY = 4;
+        const padY = 3;
         const stepX = closes.length > 1 ? width / (closes.length - 1) : 0;
-
         const isUp = closes[closes.length - 1] >= closes[0];
-        const styles = getComputedStyle(document.documentElement);
         const color = (isUp
             ? styles.getPropertyValue('--color-up').trim()
             : styles.getPropertyValue('--color-down').trim()) || (isUp ? '#10b981' : '#ef4444');
 
-        // Filled area
-        ctx.beginPath();
-        ctx.moveTo(0, height - padY);
-        closes.forEach((c, i) => {
-            const x = i * stepX;
-            const y = padY + (1 - (c - lo) / range) * (height - 2 * padY);
-            ctx.lineTo(x, y);
-        });
-        ctx.lineTo((closes.length - 1) * stepX, height - padY);
-        ctx.closePath();
-        ctx.fillStyle = color;
-        ctx.globalAlpha = 0.12;
-        ctx.fill();
-        ctx.globalAlpha = 1;
+        const yFor = (c) => padY + (1 - (c - lo) / range) * (height - 2 * padY);
 
-        // Stroke line
+        // Filled area with vertical gradient (fades to transparent at the bottom)
+        if (fillMode) {
+            const grad = ctx.createLinearGradient(0, 0, 0, height);
+            grad.addColorStop(0, color + '33');
+            grad.addColorStop(1, color + '00');
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.moveTo(0, height - padY);
+            closes.forEach((c, i) => ctx.lineTo(i * stepX, yFor(c)));
+            ctx.lineTo((closes.length - 1) * stepX, height - padY);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        // Stroke
         ctx.beginPath();
         closes.forEach((c, i) => {
             const x = i * stepX;
-            const y = padY + (1 - (c - lo) / range) * (height - 2 * padY);
+            const y = yFor(c);
             if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
         });
         ctx.strokeStyle = color;
         ctx.lineWidth = 1.5;
         ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
         ctx.stroke();
+
+        // Last-point dot — anchors the eye on the most recent value
+        const lastX = (closes.length - 1) * stepX;
+        const lastY = yFor(closes[closes.length - 1]);
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(Math.max(2, lastX - 1), lastY, 2, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // ---------- Stock-derived helpers ----------
+    // dailyData is DESC (latest first). Use [0] for today, [1] for yesterday's close.
+
+    prevCloseFor(stock) {
+        const dd = stock && stock.dailyData;
+        if (!dd || dd.length < 2) return null;
+        return dd[1].close;
+    }
+
+    avgVolumeFor(stock, n = 30) {
+        const dd = stock && stock.dailyData;
+        if (!dd || dd.length === 0) return 0;
+        const slice = dd.slice(0, n);
+        let sum = 0;
+        for (const d of slice) sum += d.volume || 0;
+        return slice.length > 0 ? sum / slice.length : 0;
+    }
+
+    range52WFor(stock) {
+        const dd = stock && stock.dailyData;
+        if (!dd || dd.length === 0) return null;
+        const slice = dd.slice(0, 252);
+        let lo = Infinity, hi = -Infinity;
+        for (const d of slice) {
+            if (d.low < lo) lo = d.low;
+            if (d.high > hi) hi = d.high;
+        }
+        if (!isFinite(lo) || !isFinite(hi)) return null;
+        return { low: lo, high: hi };
+    }
+
+    amplitudeFor(stock) {
+        const dd = stock && stock.dailyData;
+        if (!dd || dd.length === 0) return null;
+        const t = dd[0];
+        const prev = this.prevCloseFor(stock);
+        if (!prev || prev <= 0) return null;
+        return ((t.high - t.low) / prev) * 100;
+    }
+
+    rangePct(low, current, high) {
+        if (high <= low) return 0;
+        return Math.max(0, Math.min(1, (current - low) / (high - low)));
+    }
+
+    intensityFor(pct) {
+        return Math.min(Math.abs(pct) / 3, 1);
+    }
+
+    // ---------- Atomic HTML builders ----------
+
+    sparklineCanvasHTML(symbol, opts = {}) {
+        const { days = 30, height = 56, fill = true, classExtra = '' } = opts;
+        return `<canvas class="stock-card-sparkline ${classExtra}" data-symbol="${symbol}" data-days="${days}" data-height="${height}" data-fill="${fill}"></canvas>`;
+    }
+
+    trendPillHTML(value, opts = {}) {
+        const { isPercent = true, size = 'md', strong = false } = opts;
+        const isUp = value >= 0;
+        const sign = isUp ? '+' : '';
+        const text = isPercent ? `${sign}${value.toFixed(2)}%` : `${sign}${value.toFixed(2)}`;
+        const cls = `trend-pill mono size-${size} ${isUp ? 'up' : 'down'}${strong ? ' strong' : ''}`;
+        return `<span class="${cls}">${text}</span>`;
+    }
+
+    heatCellHTML(value, content) {
+        const isUp = value >= 0;
+        const intensity = this.intensityFor(value);
+        return `<span class="heat-cell mono ${isUp ? 'up' : 'down'}" style="--intensity:${intensity.toFixed(3)}">${content}</span>`;
+    }
+
+    dayRangeBarHTML(low, high, current, prevClose, opts = {}) {
+        const { label = false } = opts;
+        const pct = this.rangePct(low, current, high) * 100;
+        const prevPct = (prevClose != null && high > low) ? this.rangePct(low, prevClose, high) * 100 : null;
+        const labelHTML = label ? `
+            <div class="day-range-bar-labels mono">
+                <span>L ${this.formatPrice(low)}</span>
+                <span>H ${this.formatPrice(high)}</span>
+            </div>` : '';
+        const prevHTML = prevPct != null
+            ? `<div class="day-range-bar-prev" style="left:calc(${prevPct.toFixed(2)}% - 1px)" title="Prev close"></div>`
+            : '';
+        return `
+            <div class="day-range-bar">
+                ${labelHTML}
+                <div class="day-range-bar-track">
+                    <div class="day-range-bar-fill" style="width:${pct.toFixed(2)}%"></div>
+                    ${prevHTML}
+                    <div class="day-range-bar-current" style="left:calc(${pct.toFixed(2)}% - 4px)"></div>
+                </div>
+            </div>`;
+    }
+
+    yearRangeBarHTML(low, high, current) {
+        const pct = this.rangePct(low, current, high) * 100;
+        return `
+            <div class="year-range-bar">
+                <div class="year-range-bar-labels">
+                    <span>${this.formatPrice(low)}</span>
+                    <span class="label-mid">52W</span>
+                    <span>${this.formatPrice(high)}</span>
+                </div>
+                <div class="year-range-bar-track">
+                    <div class="year-range-bar-fill" style="width:${pct.toFixed(2)}%"></div>
+                    <div class="year-range-bar-marker" style="left:calc(${pct.toFixed(2)}% - 1px)"></div>
+                </div>
+            </div>`;
+    }
+
+    volumeRatioHTML(volume, avg) {
+        const ratio = avg > 0 ? volume / avg : 1;
+        const pct = Math.min(ratio, 2) / 2 * 100;
+        const cls = ratio >= 1.2 ? 'high' : (ratio < 0.8 ? 'low' : '');
+        return `
+            <div class="volume-ratio">
+                <div class="volume-ratio-value">${this.formatVolume(volume)}</div>
+                <div class="volume-ratio-track">
+                    <div class="volume-ratio-fill ${cls}" style="width:${pct.toFixed(2)}%"></div>
+                    <div class="volume-ratio-mid"></div>
+                </div>
+            </div>`;
     }
 
     async syncAllStocks() {
@@ -1326,6 +1606,13 @@ class StockTracker {
 
     // K-line Chart Modal Methods
     async showChartModal(symbol) {
+        // On phones, route to the dedicated full-screen mobile detail page.
+        // The drilldown layout (hero price + period tabs + cards) carries
+        // more context than a cramped chart modal.
+        if (window.innerWidth <= 640) {
+            return this.showMobileDetail(symbol);
+        }
+
         const modal = document.getElementById('chartModal');
         const chartTitle = document.getElementById('chartTitle');
         const chartSubtitle = document.getElementById('chartSubtitle');
@@ -1354,6 +1641,238 @@ class StockTracker {
         this.hideChartLoading();
         this.hideChartTooltip();
         this.currentChartSymbol = null;
+    }
+
+    // ---------- Mobile detail (full-screen drilldown) ----------
+
+    async showMobileDetail(symbol) {
+        const overlay = document.getElementById('mobileDetail');
+        if (!overlay) return;
+
+        this.currentMobileSymbol = symbol;
+        this.currentChartSymbol = symbol;
+        const stock = this.stocks.get(symbol);
+
+        // Header
+        document.getElementById('mdSymbol').textContent = symbol;
+        document.getElementById('mdName').textContent = (stock && stock.name) || '';
+        const pinBtn = document.getElementById('mdPin');
+        pinBtn.classList.toggle('is-pinned', this.isPinned(symbol));
+
+        // Wire header actions (idempotent: replaceWith clones to clear stale handlers)
+        this._rebindMd('mdBack', () => this.hideMobileDetail());
+        this._rebindMd('mdSync', async () => {
+            await this.syncStockData(symbol);
+            // After sync, re-render with fresh data
+            this.populateMobileDetail(symbol);
+        });
+        this._rebindMd('mdPin', () => {
+            this.togglePin(symbol);
+            const isPinned = this.isPinned(symbol);
+            const newBtn = document.getElementById('mdPin');
+            if (newBtn) newBtn.classList.toggle('is-pinned', isPinned);
+        });
+
+        // Period tabs — bind once via delegation
+        const tabs = document.getElementById('mdPeriodTabs');
+        if (tabs && !tabs._bound) {
+            tabs.addEventListener('click', (e) => {
+                const t = e.target.closest('.md-period-tab');
+                if (!t) return;
+                const period = parseInt(t.dataset.mdPeriod, 10);
+                if (!period) return;
+                tabs.querySelectorAll('.md-period-tab').forEach(b =>
+                    b.classList.toggle('is-active', b === t));
+                this.currentChartPeriod = period;
+                this.loadChartData(this.currentMobileSymbol, { forceRefresh: false }).then(() => {
+                    this.renderMdChart();
+                });
+            });
+            tabs._bound = true;
+        }
+
+        overlay.classList.remove('hidden');
+
+        // Initial population: text fields, then load chart
+        this.populateMobileDetail(symbol);
+        await this.loadChartData(symbol, { forceRefresh: false });
+        this.renderMdChart();
+    }
+
+    _rebindMd(id, handler) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const fresh = el.cloneNode(true);
+        el.parentNode.replaceChild(fresh, el);
+        fresh.addEventListener('click', handler);
+    }
+
+    populateMobileDetail(symbol) {
+        const stock = this.stocks.get(symbol);
+        if (!stock) return;
+        const change = stock.change || 0;
+        const changePct = stock.changePercent || 0;
+        const isUp = change >= 0;
+        const sign = isUp ? '+' : '';
+        const last = stock.dailyData && stock.dailyData[0];
+        const prev = this.prevCloseFor(stock);
+        const r52 = this.range52WFor(stock);
+        const avgVol = this.avgVolumeFor(stock, 30);
+
+        document.getElementById('mdPrice').textContent = this.formatPrice(stock.currentPrice || 0);
+        const ch = document.getElementById('mdChange');
+        ch.textContent = `${sign}${change.toFixed(2)} (${sign}${changePct.toFixed(2)}%)`;
+        ch.classList.remove('up', 'down');
+        ch.classList.add(isUp ? 'up' : 'down');
+
+        const lastUpdateEl = document.getElementById('mdLastUpdate');
+        lastUpdateEl.textContent = stock.lastUpdate
+            ? `· ${this.formatRelativeTime(stock.lastUpdate)}` : '';
+
+        // OHLCV grid
+        const ohlcGrid = document.getElementById('mdOhlc');
+        const items = last ? [
+            { l: '开盘', v: this.formatPrice(last.open) },
+            { l: '收盘', v: this.formatPrice(last.close), c: last.close >= last.open ? 'up' : 'down' },
+            { l: '最高', v: this.formatPrice(last.high), c: 'up' },
+            { l: '最低', v: this.formatPrice(last.low), c: 'down' },
+            { l: '成交量', v: this.formatVolume(last.volume) },
+            { l: '振幅', v: this.amplitudeFor(stock) != null ? this.amplitudeFor(stock).toFixed(2) + '%' : '—' },
+        ] : [];
+        ohlcGrid.innerHTML = items.map(it => `
+            <div class="md-ohlc-item">
+                <span class="label">${it.l}</span>
+                <span class="value ${it.c || ''}">${it.v}</span>
+            </div>
+        `).join('');
+
+        // Day range under OHLCV
+        document.getElementById('mdRangeText').textContent = last
+            ? `${this.formatPrice(last.low)} – ${this.formatPrice(last.high)}` : '—';
+        document.getElementById('mdDayRange').innerHTML = last
+            ? this.dayRangeBarHTML(last.low, last.high, stock.currentPrice || last.close, prev)
+            : '';
+
+        // 52W bar
+        document.getElementById('md52W').innerHTML = r52
+            ? this.yearRangeBarHTML(r52.low, r52.high, stock.currentPrice || 0)
+            : '<div class="md-card-title">52W 数据不足</div>';
+
+        // Fundamentals (market cap / P/E / volume ratio)
+        const peText = (stock.peRatio != null) ? Number(stock.peRatio).toFixed(1) : '—';
+        const mktCap = stock.marketCap || '—';
+        const ratio = (last && avgVol > 0) ? (last.volume / avgVol).toFixed(2) : '—';
+        const fund = [
+            { l: '市值', v: mktCap },
+            { l: 'P/E', v: peText },
+            { l: '量比', v: ratio },
+        ];
+        document.getElementById('mdFundamentals').innerHTML = fund.map(f => `
+            <div class="md-fundamentals-cell">
+                <div class="label">${f.l}</div>
+                <div class="value">${this._escape(String(f.v))}</div>
+            </div>
+        `).join('');
+    }
+
+    // Lightweight candlestick render targeting #mdChart canvas — same OHLC
+    // candle shape as the desktop chart but no period buttons / tooltip yet
+    // since the period selector is the tabs row.
+    renderMdChart() {
+        const canvas = document.getElementById('mdChart');
+        if (!canvas || !this._chartLayout) {
+            // _chartLayout populated by drawCandlestickChart; if data didn't
+            // load yet just paint a placeholder.
+            this._mdChartPaintPlaceholder();
+            return;
+        }
+        const data = this._chartLayout.data;
+        const dpr = window.devicePixelRatio || 1;
+        const wrap = canvas.parentElement;
+        const width = wrap.clientWidth;
+        const height = 200;
+        canvas.width = width * dpr;
+        canvas.height = height * dpr;
+        canvas.style.width = '100%';
+        canvas.style.height = `${height}px`;
+        const ctx = canvas.getContext('2d');
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.scale(dpr, dpr);
+        ctx.clearRect(0, 0, width, height);
+        if (!data || data.length === 0) return;
+
+        const padX = 4, padY = 8;
+        let lo = Infinity, hi = -Infinity;
+        for (const d of data) {
+            if (d.low < lo) lo = d.low;
+            if (d.high > hi) hi = d.high;
+        }
+        const range = hi - lo || 1;
+        const stepX = (width - padX * 2) / data.length;
+        const cw = Math.max(2, stepX * 0.6);
+        const yFor = (v) => padY + ((hi - v) / range) * (height - 2 * padY);
+
+        // Grid lines
+        const isDark = document.documentElement.classList.contains('dark');
+        ctx.strokeStyle = isDark ? '#334155' : '#e5e7eb';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2, 3]);
+        for (let i = 0; i < 4; i++) {
+            const y = padY + ((height - 2 * padY) / 3) * i;
+            ctx.beginPath();
+            ctx.moveTo(padX, y);
+            ctx.lineTo(width - padX, y);
+            ctx.stroke();
+        }
+        ctx.setLineDash([]);
+
+        data.forEach((bar, i) => {
+            const x = padX + stepX * i + stepX / 2;
+            const oY = yFor(bar.open);
+            const cY = yFor(bar.close);
+            const hY = yFor(bar.high);
+            const lY = yFor(bar.low);
+            const rising = bar.close >= bar.open;
+            const color = rising ? '#10b981' : '#ef4444';
+            ctx.strokeStyle = color;
+            ctx.fillStyle = color;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(x, hY);
+            ctx.lineTo(x, lY);
+            ctx.stroke();
+            const top = Math.min(oY, cY);
+            const ht = Math.max(1.5, Math.abs(cY - oY));
+            if (rising) {
+                ctx.lineWidth = 1.5;
+                ctx.strokeRect(x - cw / 2, top, cw, ht);
+            } else {
+                ctx.fillRect(x - cw / 2, top, cw, ht);
+            }
+        });
+    }
+
+    _mdChartPaintPlaceholder() {
+        const canvas = document.getElementById('mdChart');
+        if (!canvas) return;
+        const dpr = window.devicePixelRatio || 1;
+        const width = canvas.parentElement.clientWidth;
+        const height = 200;
+        canvas.width = width * dpr;
+        canvas.height = height * dpr;
+        canvas.style.width = '100%';
+        canvas.style.height = `${height}px`;
+        const ctx = canvas.getContext('2d');
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.scale(dpr, dpr);
+        ctx.clearRect(0, 0, width, height);
+    }
+
+    hideMobileDetail() {
+        const overlay = document.getElementById('mobileDetail');
+        if (overlay) overlay.classList.add('hidden');
+        this.currentMobileSymbol = null;
+        this.abortActiveChartRequest();
     }
 
     setupChartModalEventListeners(symbol) {

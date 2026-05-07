@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http/cookiejar"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-resty/resty/v2"
@@ -46,13 +48,19 @@ type Quote struct {
 }
 
 type YahooFinanceClient struct {
-	client *resty.Client
+	client  *resty.Client
+	crumb   string
+	crumbMu sync.Mutex
 }
 
 func NewYahooFinanceClient() *YahooFinanceClient {
 	client := resty.New()
 	client.SetTimeout(30 * time.Second)
 	client.SetHeader("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
+	// Enable cookie jar — quoteSummary requires the cookies set by fc.yahoo.com
+	// to validate the crumb token in subsequent requests.
+	jar, _ := cookiejar.New(nil)
+	client.GetClient().Jar = jar
 
 	return &YahooFinanceClient{client: client}
 }
@@ -367,6 +375,115 @@ func (y *YahooFinanceClient) GetDailyHistory(symbol, rangeStr string) ([]DailyBa
 
 	log.Printf("Fetched %d daily bars for %s", len(bars), symbol)
 	return bars, nil
+}
+
+// QuoteFundamentals holds the lightweight fundamentals we surface in the UI.
+// Yahoo's `quoteSummary` endpoint is the source. PERatio uses *float64 because
+// it can be legitimately absent (e.g. unprofitable companies, ETFs).
+type QuoteFundamentals struct {
+	MarketCap string
+	PERatio   *float64
+}
+
+// quoteSummaryResp matches the subset of fields we read from
+// /v10/finance/quoteSummary.
+type quoteSummaryResp struct {
+	QuoteSummary struct {
+		Result []struct {
+			SummaryDetail struct {
+				MarketCap struct {
+					Fmt string  `json:"fmt"`
+					Raw float64 `json:"raw"`
+				} `json:"marketCap"`
+				TrailingPE struct {
+					Raw float64 `json:"raw"`
+				} `json:"trailingPE"`
+			} `json:"summaryDetail"`
+		} `json:"result"`
+		Error interface{} `json:"error"`
+	} `json:"quoteSummary"`
+}
+
+// refreshCrumb performs the two-step Yahoo cookie+crumb dance. Call before
+// quoteSummary requests; cache the result on the client. The crumb token is
+// tied to the cookie jar, so both must persist together.
+func (y *YahooFinanceClient) refreshCrumb() error {
+	y.crumbMu.Lock()
+	defer y.crumbMu.Unlock()
+
+	// Step 1: any Yahoo URL that sets cookies. fc.yahoo.com 404s but still
+	// sets the necessary cookies in the jar.
+	if _, err := y.client.R().Get("https://fc.yahoo.com"); err != nil {
+		return fmt.Errorf("fc.yahoo.com cookie probe: %v", err)
+	}
+
+	// Step 2: exchange cookies for a crumb token.
+	resp, err := y.client.R().Get("https://query1.finance.yahoo.com/v1/test/getcrumb")
+	if err != nil {
+		return fmt.Errorf("getcrumb: %v", err)
+	}
+	if resp.StatusCode() != 200 {
+		return fmt.Errorf("getcrumb HTTP %d: %s", resp.StatusCode(), resp.String())
+	}
+	crumb := strings.TrimSpace(resp.String())
+	if crumb == "" {
+		return fmt.Errorf("empty crumb")
+	}
+	y.crumb = crumb
+	return nil
+}
+
+// GetQuoteSummary fetches market cap and trailing P/E for a symbol via Yahoo's
+// authenticated quoteSummary endpoint. Best-effort: returns a partial struct
+// with whatever fields parsed cleanly, plus an error if the network leg failed.
+func (y *YahooFinanceClient) GetQuoteSummary(symbol string) (QuoteFundamentals, error) {
+	if y.crumb == "" {
+		if err := y.refreshCrumb(); err != nil {
+			return QuoteFundamentals{}, fmt.Errorf("init crumb: %v", err)
+		}
+	}
+
+	doFetch := func() (*resty.Response, error) {
+		url := fmt.Sprintf(
+			"https://query1.finance.yahoo.com/v10/finance/quoteSummary/%s?modules=summaryDetail&crumb=%s",
+			symbol, y.crumb,
+		)
+		return y.client.R().Get(url)
+	}
+
+	resp, err := doFetch()
+	if err != nil {
+		return QuoteFundamentals{}, fmt.Errorf("quoteSummary fetch: %v", err)
+	}
+	// 401 typically means the crumb expired; retry once with a fresh crumb.
+	if resp.StatusCode() == 401 {
+		if err := y.refreshCrumb(); err != nil {
+			return QuoteFundamentals{}, fmt.Errorf("refresh crumb: %v", err)
+		}
+		resp, err = doFetch()
+		if err != nil {
+			return QuoteFundamentals{}, fmt.Errorf("quoteSummary retry: %v", err)
+		}
+	}
+	if resp.StatusCode() != 200 {
+		return QuoteFundamentals{}, fmt.Errorf("quoteSummary HTTP %d", resp.StatusCode())
+	}
+
+	var parsed quoteSummaryResp
+	if err := json.Unmarshal(resp.Body(), &parsed); err != nil {
+		return QuoteFundamentals{}, fmt.Errorf("quoteSummary parse: %v", err)
+	}
+	if len(parsed.QuoteSummary.Result) == 0 {
+		return QuoteFundamentals{}, fmt.Errorf("quoteSummary empty result")
+	}
+	sd := parsed.QuoteSummary.Result[0].SummaryDetail
+
+	out := QuoteFundamentals{MarketCap: sd.MarketCap.Fmt}
+	if sd.TrailingPE.Raw > 0 {
+		v := sd.TrailingPE.Raw
+		out.PERatio = &v
+	}
+	return out, nil
 }
 
 // yahooSearchResp matches the subset of Yahoo's /v1/finance/search response

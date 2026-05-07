@@ -22,13 +22,15 @@ func (ws *WebServer) getWatchedStocks(c *gin.Context) {
 	apiStocks := make([]WatchedStockAPI, 0, len(stocks))
 	for _, stock := range stocks {
 		apiStocks = append(apiStocks, WatchedStockAPI{
-			ID:       int(stock.ID),
-			Symbol:   stock.Symbol,
-			Name:     stock.Name,
-			AddedAt:  stock.AddedAt,
-			LastSync: stock.LastSync,
-			IsActive: stock.IsActive,
-			Pinned:   stock.Pinned,
+			ID:        int(stock.ID),
+			Symbol:    stock.Symbol,
+			Name:      stock.Name,
+			AddedAt:   stock.AddedAt,
+			LastSync:  stock.LastSync,
+			IsActive:  stock.IsActive,
+			Pinned:    stock.Pinned,
+			MarketCap: stock.MarketCap,
+			PERatio:   stock.PERatio,
 		})
 	}
 
@@ -112,16 +114,22 @@ func (ws *WebServer) getStockSummary(c *gin.Context) {
 		return
 	}
 
-	var stockName string
+	var stockName, marketCap string
+	var peRatio *float64
+	var pinned bool
 	for _, stock := range watchedStocks {
 		if stock.Symbol == symbol {
 			stockName = stock.Name
+			marketCap = stock.MarketCap
+			peRatio = stock.PERatio
+			pinned = stock.Pinned
 			break
 		}
 	}
 
-	// Get daily summary for last 30 days
-	dailyData, err := ws.collector.database.GetDailySummary(symbol, 30)
+	// Pull a year of daily summaries so the frontend can compute 52W high/low
+	// and 30-day average volume without an extra round-trip.
+	dailyData, err := ws.collector.database.GetDailySummary(symbol, 365)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -132,10 +140,13 @@ func (ws *WebServer) getStockSummary(c *gin.Context) {
 	if err != nil {
 		// If no price data, return just the daily data
 		c.JSON(http.StatusOK, StockSummary{
-			Symbol:     symbol,
-			Name:       stockName,
-			DailyData:  dailyData,
-			IsActive:   true,
+			Symbol:    symbol,
+			Name:      stockName,
+			DailyData: dailyData,
+			IsActive:  true,
+			Pinned:    pinned,
+			MarketCap: marketCap,
+			PERatio:   peRatio,
 		})
 		return
 	}
@@ -163,6 +174,9 @@ func (ws *WebServer) getStockSummary(c *gin.Context) {
 		LastUpdate:    lastUpdate,
 		DailyData:     dailyData,
 		IsActive:      true,
+		Pinned:        pinned,
+		MarketCap:     marketCap,
+		PERatio:       peRatio,
 	}
 
 	c.JSON(http.StatusOK, summary)

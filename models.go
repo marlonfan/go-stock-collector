@@ -15,6 +15,8 @@ type WatchedStockAPI struct {
 	LastSync  *time.Time `json:"lastSync"`
 	IsActive  bool       `json:"isActive"`
 	Pinned    bool       `json:"pinned"`
+	MarketCap string     `json:"marketCap,omitempty"`
+	PERatio   *float64   `json:"peRatio,omitempty"`
 }
 
 // DailySummaryAPI is the API-compatible version of StockDailySummary
@@ -31,14 +33,17 @@ type DailySummaryAPI struct {
 }
 
 type StockSummary struct {
-	Symbol       string            `json:"symbol"`
-	Name         string            `json:"name"`
-	CurrentPrice float64           `json:"currentPrice"`
-	Change       float64           `json:"change"`
-	ChangePercent float64          `json:"changePercent"`
-	LastUpdate   time.Time         `json:"lastUpdate"`
-	DailyData    []DailySummaryAPI `json:"dailyData"`
-	IsActive     bool              `json:"isActive"`
+	Symbol        string            `json:"symbol"`
+	Name          string            `json:"name"`
+	CurrentPrice  float64           `json:"currentPrice"`
+	Change        float64           `json:"change"`
+	ChangePercent float64           `json:"changePercent"`
+	LastUpdate    time.Time         `json:"lastUpdate"`
+	DailyData     []DailySummaryAPI `json:"dailyData"`
+	IsActive      bool              `json:"isActive"`
+	Pinned        bool              `json:"pinned"`
+	MarketCap     string            `json:"marketCap,omitempty"`
+	PERatio       *float64          `json:"peRatio,omitempty"`
 }
 
 type AddStockRequest struct {

@@ -259,6 +259,22 @@ func (d *Database) UpdateLastSync(symbol string) error {
 	return nil
 }
 
+// UpdateQuoteFundamentals updates marketCap + peRatio for every user who
+// watches this symbol — fundamentals are shared market data, not per-user.
+func (d *Database) UpdateQuoteFundamentals(symbol string, marketCap string, peRatio *float64) error {
+	updates := map[string]interface{}{
+		"market_cap": marketCap,
+		"pe_ratio":   peRatio,
+	}
+	result := d.db.Model(&WatchedStock{}).
+		Where("symbol = ?", symbol).
+		Updates(updates)
+	if result.Error != nil {
+		return fmt.Errorf("failed to update fundamentals: %v", result.Error)
+	}
+	return nil
+}
+
 // SetPinned toggles the pinned flag for a user's watched stock.
 func (d *Database) SetPinned(userID uint, symbol string, pinned bool) error {
 	result := d.db.Model(&WatchedStock{}).
